@@ -34,6 +34,14 @@ after 60 seconds so the game never gets stuck.
 board. When someone draws one, the top card lifts off the pile and everyone sees
 a pop-up with who drew it and what it says.
 
+**Leaving and restarting:** **Leave game** hands your seat to a bot and takes
+you back to the start page so you can create or join another room. The host
+also has **Back to lobby**, which ends the game for everyone and returns the
+room to the lobby to start again. If someone is away, the host can press
+**Bot plays** next to their name; they get an **I'm back** button to take the
+seat back. Bots pause while no person is connected, and abandoned rooms are
+cleaned up after a few minutes.
+
 Open the page, create a room, and share the link (or the 4-letter code). The
 host can add bots, remove players and start the game. Reloading the page or
 losing signal puts you back in your seat. If someone drops out mid-game, the host

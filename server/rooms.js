@@ -115,7 +115,7 @@ export class Room {
       hostId: this.hostId,
       started: this.started,
       members: this.members.map((m) => ({
-        id: m.id, name: m.name, bot: m.bot, autoplay: m.autoplay, connected: m.bot || !!m.stream, piece: m.piece,
+        id: m.id, name: m.name, bot: m.bot, autoplay: m.autoplay, left: !!m.left, connected: m.bot || !!m.stream, piece: m.piece,
       })),
     };
   }
@@ -222,17 +222,34 @@ export class Room {
     this.scheduleBot();
   }
 
-  /** Hand a disconnected human's seat to a bot until they return. */
+  /** Host hands an away (or disconnected) player's seat to a bot until they're back. */
   takeover(by, targetId) {
     this._requireHost(by);
     if (!this.started) bad('not_started', 'The game has not started.');
     const m = this.member(targetId);
-    if (!m || m.bot) bad('no_such_player', 'No such player.');
-    if (m.stream) bad('still_connected', 'That player is still connected.');
+    if (!m || m.bot || m.left) bad('no_such_player', 'No such player.');
+    if (m.id === by) bad('bad_request', 'Use Leave game to hand over your own seat.');
     m.autoplay = true;
     this.closeCard(m.id);
     this.broadcastInfo();
     this.scheduleBot();
+  }
+
+  /** A player who was handed to a bot takes their seat back. */
+  back(id) {
+    const m = this.member(id);
+    if (!m || m.bot || m.left) bad('no_such_player', 'No such player.');
+    if (!m.autoplay) return;
+    m.autoplay = false;
+    this.touched = Date.now();
+    this.broadcastInfo();
+    this.scheduleBot();
+  }
+
+  /** Someone still playing who isn't a bot (to pass the host role to). */
+  _nextHost(except) {
+    return this.members.find((x) => !x.bot && !x.left && x.id !== except && x.stream)?.id
+      ?? this.members.find((x) => !x.bot && !x.left && x.id !== except)?.id ?? null;
   }
 
   leave(id) {
@@ -241,16 +258,38 @@ export class Room {
     this.touched = Date.now();
     if (!this.started) {
       this.members = this.members.filter((x) => x !== m);
-      if (this.hostId === id) this.hostId = this.members.find((x) => !x.bot)?.id ?? null;
+      if (this.hostId === id) this.hostId = this._nextHost(id);
     } else {
+      // A bot finishes the game in their seat.
       m.autoplay = true;
+      m.left = true;
+      m.token = null; // the seat can't be reclaimed after leaving
       this.closeCard(id);
+      if (this.hostId === id) this.hostId = this._nextHost(id);
     }
     const stream = m.stream;
     m.stream = null;
     stream?.close();
     this.broadcastInfo();
     this.scheduleBot();
+  }
+
+  /** Host ends the current game and takes everyone back to the lobby. */
+  restart(by) {
+    this._requireHost(by);
+    if (!this.started) bad('not_started', 'The game has not started.');
+    clearTimeout(this.botTimer);
+    clearTimeout(this.tradeTimer);
+    clearTimeout(this.cardTimer);
+    this.botTimer = this.tradeTimer = this.cardTimer = null;
+    this.tradeKey = this.tradeDeadline = null;
+    this.pendingCard = null;
+    this.state = null;
+    // People who left don't come back; everyone else (and the bots) stays.
+    this.members = this.members.filter((m) => !m.left);
+    for (const m of this.members) m.autoplay = false;
+    this.touched = Date.now();
+    this.broadcastInfo();
   }
 
   chat(id, text) {
@@ -331,6 +370,8 @@ export class Room {
     clearTimeout(this.botTimer);
     this.botTimer = null;
     if (this.disposed || !this.state || this.state.winner || this.pendingCard) return;
+    // Nobody watching (everyone left or disconnected): pause until someone is back.
+    if (!this.members.some((m) => !m.bot && m.stream)) return;
     const actorId = getActor(this.state);
     const m = actorId && this.member(actorId);
     if (!m || !(m.bot || m.autoplay)) return;
@@ -400,7 +441,9 @@ export class Lobby {
   /** Drop empty rooms and rooms with no activity for `idleMs`. */
   sweep(now = Date.now()) {
     for (const [code, room] of this.rooms) {
-      if (room.members.length === 0 || now - room.touched > this.idleMs) {
+      const abandoned = room.started && room.members.every((m) => m.bot || m.left)
+        && now - room.touched > 5 * 60 * 1000;
+      if (room.members.length === 0 || abandoned || now - room.touched > this.idleMs) {
         room.dispose();
         this.rooms.delete(code);
       }

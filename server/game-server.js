@@ -4,8 +4,9 @@
 //   POST /api/rooms/:code/join      { name } or { token }    -> { code, id, token }
 //   GET  /api/rooms/:code/events?token=...                    -> server-sent events
 //   POST /api/rooms/:code/action    { token, action }        -> { ok }
-//   POST /api/rooms/:code/host      { token, op, target? }   -> { ok }   op: add_bot | kick | start | takeover
+//   POST /api/rooms/:code/host      { token, op, target? }   -> { ok }   op: add_bot | kick | start | takeover | restart
 //   POST /api/rooms/:code/card-ok   { token, seq }           -> { ok }   drawer closes the card pop-up
+//   POST /api/rooms/:code/back      { token }                -> { ok }   take your seat back from the bot
 //   POST /api/rooms/:code/piece     { token, piece }         -> { ok }   choose a piece (lobby only)
 //   POST /api/rooms/:code/chat      { token, text }          -> { ok }
 //   POST /api/rooms/:code/leave     { token }                -> { ok }
@@ -205,6 +206,7 @@ export function createGameServer({ botDelay = 1500, corsOrigin = process.env.COR
           case 'kick': room.kick(m.id, body.target); break;
           case 'start': room.start(m.id); break;
           case 'takeover': room.takeover(m.id, body.target); break;
+          case 'restart': room.restart(m.id); break;
           default: throw new HttpError(400, 'bad_request', 'Unknown host operation.');
         }
         return send(res, 200, { ok: true });
@@ -212,6 +214,11 @@ export function createGameServer({ botDelay = 1500, corsOrigin = process.env.COR
       case 'card-ok': {
         const m = auth(room, body.token);
         room.closeCard(m.id, Number.isInteger(body.seq) ? body.seq : null);
+        return send(res, 200, { ok: true });
+      }
+      case 'back': {
+        const m = auth(room, body.token);
+        room.back(m.id);
         return send(res, 200, { ok: true });
       }
       case 'piece': {

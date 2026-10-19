@@ -190,27 +190,85 @@ test('lobby rules: names are cleaned and unique, max 8 seats, no joining mid-gam
   }
 });
 
-test('a human vs bots game plays itself to the end when the human is on autoplay', async () => {
+test('leaving mid-game: a bot takes the seat, the host role moves on, and the game plays out', async () => {
   const ctx = await startServer({ botDelay: 0 });
   try {
     const host = (await post(ctx.base, '/api/rooms', { name: 'Ana' })).body;
-    for (let i = 0; i < 3; i++) {
+    const bob = (await post(ctx.base, `/api/rooms/${host.code}/join`, { name: 'Bob' })).body;
+    for (let i = 0; i < 2; i++) {
       await post(ctx.base, `/api/rooms/${host.code}/host`, { token: host.token, op: 'add_bot' });
     }
-    const s = connect(ctx, host.code, host.token);
-    await s.ready;
+    const hs = connect(ctx, host.code, host.token);
+    const bs = connect(ctx, host.code, bob.token);
+    await Promise.all([hs.ready, bs.ready]);
     await post(ctx.base, `/api/rooms/${host.code}/host`, { token: host.token, op: 'start' });
-    await s.wait((e) => e.type === 'state');
-
-    // Takeover is refused while connected, allowed once the human leaves.
-    const refused = await post(ctx.base, `/api/rooms/${host.code}/host`, { token: host.token, op: 'takeover', target: host.id });
-    assert.equal(refused.body.error, 'still_connected');
-    await post(ctx.base, `/api/rooms/${host.code}/leave`, { token: host.token });
-
+    await bs.wait((e) => e.type === 'state');
     const room = ctx.lobby.get(host.code);
+
+    // The host can hand an away player (still connected) to a bot...
+    assert.equal((await post(ctx.base, `/api/rooms/${host.code}/host`, { token: host.token, op: 'takeover', target: host.id })).status, 400);
+    assert.equal((await post(ctx.base, `/api/rooms/${host.code}/host`, { token: host.token, op: 'takeover', target: bob.id })).status, 200);
+    assert.equal(room.member(bob.id).autoplay, true);
+    // ...and that player can take it back.
+    await post(ctx.base, `/api/rooms/${host.code}/back`, { token: bob.token });
+    assert.equal(room.member(bob.id).autoplay, false);
+    await post(ctx.base, `/api/rooms/${host.code}/host`, { token: host.token, op: 'takeover', target: bob.id });
+
+    // Ana leaves: a bot plays her seat, Bob becomes host, her old token is dead.
+    await post(ctx.base, `/api/rooms/${host.code}/leave`, { token: host.token });
+    assert.equal(room.hostId, bob.id);
+    assert.equal(room.member(host.id).left, true);
+    assert.equal((await post(ctx.base, `/api/rooms/${host.code}/join`, { token: host.token })).status, 403);
+
     const deadline = Date.now() + 20000;
     while (!room.state.winner && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25));
     assert.ok(room.state.winner, `game did not finish (turn ${room.state.turn})`);
+  } finally {
+    await ctx.stop();
+  }
+});
+
+test('bots wait while no person is watching', async () => {
+  const ctx = await startServer({ botDelay: 0 });
+  try {
+    const host = (await post(ctx.base, '/api/rooms', { name: 'Ana' })).body;
+    await post(ctx.base, `/api/rooms/${host.code}/host`, { token: host.token, op: 'add_bot' });
+    await post(ctx.base, `/api/rooms/${host.code}/host`, { token: host.token, op: 'add_bot' });
+    await post(ctx.base, `/api/rooms/${host.code}/host`, { token: host.token, op: 'start' });
+    const room = ctx.lobby.get(host.code);
+    await post(ctx.base, `/api/rooms/${host.code}/leave`, { token: host.token });
+    const turn = room.state.turn;
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(room.state.turn, turn, 'nobody is connected, so nothing should happen');
+    ctx.lobby.sweep(Date.now() + 6 * 60 * 1000);
+    assert.ok(!ctx.lobby.rooms.has(host.code), 'abandoned room is cleaned up');
+  } finally {
+    await ctx.stop();
+  }
+});
+
+test('the host can end the game and take everyone back to the lobby', async () => {
+  const ctx = await startServer({ botDelay: 50 });
+  try {
+    const host = (await post(ctx.base, '/api/rooms', { name: 'Ana' })).body;
+    const bob = (await post(ctx.base, `/api/rooms/${host.code}/join`, { name: 'Bob' })).body;
+    const cat = (await post(ctx.base, `/api/rooms/${host.code}/join`, { name: 'Cat' })).body;
+    await post(ctx.base, `/api/rooms/${host.code}/host`, { token: host.token, op: 'add_bot' });
+    const bs = connect(ctx, host.code, bob.token);
+    await bs.ready;
+    await post(ctx.base, `/api/rooms/${host.code}/host`, { token: host.token, op: 'start' });
+    await bs.wait((e) => e.type === 'state');
+    await post(ctx.base, `/api/rooms/${host.code}/leave`, { token: cat.token });
+    assert.equal((await post(ctx.base, `/api/rooms/${host.code}/host`, { token: bob.token, op: 'restart' })).status, 403);
+    const back = bs.next((e) => e.type === 'lobby' && !e.data.started);
+    assert.equal((await post(ctx.base, `/api/rooms/${host.code}/host`, { token: host.token, op: 'restart' })).status, 200);
+    const info = (await back).data;
+    assert.deepEqual(info.members.map((m) => m.name).sort(), ['Ana', 'Bob', 'Bot Mira']);
+    const room = ctx.lobby.get(host.code);
+    assert.equal(room.state, null);
+    // and a fresh game can start
+    assert.equal((await post(ctx.base, `/api/rooms/${host.code}/host`, { token: host.token, op: 'start' })).status, 200);
+    assert.equal(room.state.turn, 1);
   } finally {
     await ctx.stop();
   }

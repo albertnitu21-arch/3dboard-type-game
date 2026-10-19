@@ -78,6 +78,16 @@ function enterRoom(s) {
   connect();
 }
 
+function resetGameView() {
+  game = null;
+  queue.length = 0;
+  logLines.length = 0;
+  selectedSpace = null;
+  tradeUI.close();
+  closeCard?.();
+  money.reset();
+}
+
 function leaveRoom(message = '') {
   source?.close();
   source = null;
@@ -99,7 +109,11 @@ function leaveRoom(message = '') {
 function connect() {
   source?.close();
   source = new EventSource(`${API}/api/rooms/${session.code}/events?token=${encodeURIComponent(session.token)}`);
-  source.addEventListener('lobby', (e) => { lobby = JSON.parse(e.data); render(); });
+  source.addEventListener('lobby', (e) => {
+    lobby = JSON.parse(e.data);
+    if (!lobby.started && game) resetGameView(); // the host went back to the lobby
+    render();
+  });
   source.addEventListener('state', (e) => enqueue(JSON.parse(e.data)));
   source.addEventListener('chat', (e) => {
     const m = JSON.parse(e.data);
@@ -557,15 +571,30 @@ function renderSide() {
   $('players').replaceChildren(...state.players.map((pl) => {
     const m = lobby.members.find((x) => x.id === pl.id);
     const offline = m && !m.bot && !m.connected && !m.autoplay;
+    const canHandOver = isHost && m && !m.bot && !m.autoplay && !m.left && pl.id !== session.id && !pl.bankrupt;
     return el('li', { class: `${pl.id === cur().id ? 'turn' : ''}${pl.bankrupt ? ' out' : ''}`, 'data-flash': '' },
       el('span', { class: 'dot', style: `background:${colorOf(pl.id)}` }),
       el('span', { class: 'piece', title: pieceOf(pl.id).name }, pieceOf(pl.id).emoji),
       el('span', { class: 'grow' }, pl.name, pl.id === session.id ? ' (you)' : '', pl.inJail ? ' 🔒' : ''),
-      el('span', { class: 'tag' }, m?.bot ? 'bot' : m?.autoplay ? 'auto' : offline ? 'offline' : ''),
-      isHost && offline && !pl.bankrupt ? el('button', { class: 'small', onclick: () => host('takeover', pl.id) }, 'Bot plays') : null,
+      el('span', { class: 'tag' }, m?.bot ? 'bot' : m?.left ? 'left' : m?.autoplay ? 'bot playing' : offline ? 'offline' : ''),
+      canHandOver ? el('button', {
+        class: 'small',
+        title: `Let a bot play for ${pl.name} (e.g. if they're away). They can take the seat back.`,
+        onclick: () => confirm(`Let a bot play for ${pl.name}? They can take their seat back with "I'm back".`) && host('takeover', pl.id),
+      }, 'Bot plays') : null,
       el('span', { class: `cash ${money.direction(pl.id)}`, 'data-cash': pl.id }, money.value(pl.id)));
   }));
   renderMine();
+
+  const meM = lobby.members.find((x) => x.id === session.id);
+  const away = !!meM?.autoplay && !meM.left && !me()?.bankrupt && !state.winner;
+  $('away-bar').hidden = !away;
+  if (away) {
+    $('away-bar').replaceChildren(
+      el('span', {}, '🤖 A bot is playing for you.'),
+      el('button', { type: 'button', class: 'small primary', onclick: () => roomApi('back').catch((e) => { $('game-error').textContent = e.message; }) }, "I'm back"));
+  }
+  $('restart-game').hidden = !isHost;
 }
 
 function renderMine() {
@@ -662,6 +691,15 @@ try { if (board3d && localStorage.getItem('estate-cam') === 'follow') board3d.se
 try { if (localStorage.getItem('estate-view') === '2d') use3d = false; } catch { /* ignore */ }
 $('board3d').hidden = !use3d;
 $('board').hidden = use3d;
+$('leave-game').onclick = async () => {
+  const over = game?.state.winner;
+  if (!over && !confirm('Leave this game? A bot will finish it in your seat, and you can start or join a new game.')) return;
+  try { await roomApi('leave'); } catch { /* already gone */ }
+  leaveRoom(over ? '' : 'You left the game. Create a new room or join another one.');
+};
+$('restart-game').onclick = () => {
+  if (game?.state.winner || confirm('End this game for everyone and go back to the lobby? Progress will be lost.')) host('restart');
+};
 $('add-bot').onclick = () => host('add_bot');
 $('start').onclick = () => host('start');
 $('copy').onclick = () => navigator.clipboard?.writeText($('share').href);

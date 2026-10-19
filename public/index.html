@@ -49,6 +49,7 @@
         </div>
       </div>
       <aside class="side">
+        <div id="away-bar" class="away-bar" hidden></div>
         <div id="status" class="status"></div>
         <div id="actions" class="actions"></div>
         <p id="game-error" class="error" role="alert"></p>
@@ -60,6 +61,10 @@
         </details>
         <div id="trade-banner" class="trade-banner" hidden></div>
         <ol id="log" class="log"></ol>
+        <div class="game-menu">
+          <button id="leave-game" class="small ghost" type="button">Leave game</button>
+          <button id="restart-game" class="small ghost" type="button" hidden>Back to lobby</button>
+        </div>
         <form id="chat-form" class="row">
           <input id="chat-input" maxlength="200" placeholder="Say something…" autocomplete="off">
           <button>Send</button>
