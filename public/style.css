@@ -470,3 +470,10 @@ body.full.panel-hidden .side { display: none; }
   body.full .board-wrap .board-tools { right: 10px; left: 10px; gap: 4px; }
   body.full #reset-view, body.full #toggle-view { display: none; }
 }
+
+/* "You still have a seat in room X" on the start page */
+.resume { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel)); border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line)); font-size: 14px; }
+.resume .grow { flex: 1; min-width: 160px; }
+.resume b { font-family: ui-monospace, monospace; letter-spacing: 0.12em; }
+.resume .ghost { align-self: auto; }

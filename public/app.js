@@ -743,7 +743,10 @@ async function homeAction(fn) {
   if (!name) { $('home-error').textContent = 'Enter your name first.'; $('name').focus(); return; }
   store.setName(name);
   try {
-    enterRoom(await fn(name));
+    const next = await fn(name);
+    const old = store.get();
+    if (old && old.code !== next.code) await forgetSaved();
+    enterRoom(next);
   } catch (e) {
     $('home-error').textContent = e.message;
   }
@@ -882,12 +885,39 @@ $('chat-form').onsubmit = (e) => {
   roomApi('chat', { text }).catch(() => {});
 };
 
-// Resume a saved seat (page reload, phone locked, etc.).
+// Resume a saved seat. Reloading the room's own page (?room=CODE) goes straight back
+// in; opening the plain site shows the start page with a "Rejoin" offer instead of
+// forcing you into the old room.
+async function forgetSaved() {
+  const old = store.get();
+  $('resume').hidden = true;
+  if (!old) return;
+  store.clear();
+  try { await api(`/api/rooms/${old.code}/leave`, { token: old.token }); } catch { /* already gone */ }
+}
 const saved = store.get();
-if (saved && (!params.get('room') || params.get('room').toUpperCase() === saved.code)) {
+if (saved && params.get('room')?.toUpperCase() === saved.code) {
   api(`/api/rooms/${saved.code}/join`, { token: saved.token })
     .then(enterRoom)
     .catch(() => { store.clear(); show('home'); });
 } else {
   show('home');
+  if (saved) {
+    // only offer it if the seat still exists (rejoining with the token doesn't change anything)
+    api(`/api/rooms/${saved.code}/join`, { token: saved.token })
+      .then(() => {
+        if (session || store.get()?.code !== saved.code) return;
+        $('resume-code').textContent = saved.code;
+        $('resume').hidden = false;
+      })
+      .catch(() => store.clear());
+  }
 }
+$('resume-go').onclick = () => {
+  const s = store.get();
+  if (!s) { $('resume').hidden = true; return; }
+  api(`/api/rooms/${s.code}/join`, { token: s.token })
+    .then((r) => { $('resume').hidden = true; enterRoom(r); })
+    .catch(() => { forgetSaved(); $('home-error').textContent = 'That room is no longer available.'; });
+};
+$('resume-forget').onclick = () => forgetSaved();
