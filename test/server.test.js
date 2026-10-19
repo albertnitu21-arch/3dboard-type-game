@@ -163,6 +163,18 @@ test('bad requests get clear errors', async () => {
   }
 });
 
+test('bots are named Catalina, Samuel, Robert, Angelo, Roxana, in that order', async () => {
+  const ctx = await startServer();
+  try {
+    const host = (await post(ctx.base, '/api/rooms', { name: 'Ana' })).body;
+    for (let i = 0; i < 7; i++) await post(ctx.base, `/api/rooms/${host.code}/host`, { token: host.token, op: 'add_bot' });
+    const names = ctx.lobby.get(host.code).info().members.filter((m) => m.bot).map((m) => m.name);
+    assert.deepEqual(names, ['Catalina', 'Samuel', 'Robert', 'Angelo', 'Roxana', 'Bot 6', 'Bot 7']);
+  } finally {
+    await ctx.stop();
+  }
+});
+
 test('lobby rules: names are cleaned and unique, max 8 seats, no joining mid-game', async () => {
   const ctx = await startServer();
   try {
@@ -263,7 +275,7 @@ test('the host can end the game and take everyone back to the lobby', async () =
     const back = bs.next((e) => e.type === 'lobby' && !e.data.started);
     assert.equal((await post(ctx.base, `/api/rooms/${host.code}/host`, { token: host.token, op: 'restart' })).status, 200);
     const info = (await back).data;
-    assert.deepEqual(info.members.map((m) => m.name).sort(), ['Ana', 'Bob', 'Bot Mira']);
+    assert.deepEqual(info.members.map((m) => m.name).sort(), ['Ana', 'Bob', 'Catalina']);
     const room = ctx.lobby.get(host.code);
     assert.equal(room.state, null);
     // and a fresh game can start

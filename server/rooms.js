@@ -25,7 +25,8 @@ const bad = (code, message) => { throw new RoomError(code, message); };
 export const MAX_PLAYERS = 8;
 export const MIN_PLAYERS = 2;
 const ALLOWED_ACTIONS = new Set(ACTION_TYPES);
-const BOT_NAMES = ['Mira', 'Dan', 'Ioana', 'Vlad', 'Ana', 'Radu', 'Elena', 'Tudor'];
+// Bots are named in this order as the host adds them.
+const BOT_NAMES = ['Catalina', 'Samuel', 'Robert', 'Angelo', 'Roxana'];
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no look-alikes (0/O, 1/I/L)
 
 /** What clients may see: everything except the RNG state and the card order. */
@@ -167,7 +168,8 @@ export class Room {
     this._requireHost(by);
     if (this.started) bad('game_started', 'The game has already started.');
     const used = new Set(this.members.map((m) => m.name));
-    const name = BOT_NAMES.map((n) => `Bot ${n}`).find((n) => !used.has(n)) ?? 'Bot';
+    const name = BOT_NAMES.find((n) => !used.has(n))
+      ?? `Bot ${this.members.filter((m) => m.bot).length + 1}`; // after the five names
     this._add(name, { bot: true });
     this.touched = Date.now();
     this.broadcastInfo();
