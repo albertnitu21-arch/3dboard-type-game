@@ -1,0 +1,16 @@
+{
+  "name": "estate-game",
+  "version": "0.1.0",
+  "description": "Original turn-based property trading game: rules engine, multiplayer server and web client (no dependencies).",
+  "type": "module",
+  "main": "server/game-server.js",
+  "scripts": {
+    "start": "node server/game-server.js",
+    "test": "node --test",
+    "sim": "node src/simulate.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

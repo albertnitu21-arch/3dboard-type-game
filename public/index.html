@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Estate</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="app">
+    <section id="home" class="screen">
+      <h1>Estate</h1>
+      <p class="sub">A property trading game for 2–8 players.</p>
+      <label>Your name <input id="name" maxlength="20" autocomplete="nickname" placeholder="e.g. Ana"></label>
+      <button id="create" class="primary">Create a room</button>
+      <div class="or">or join one</div>
+      <div class="row">
+        <input id="code" maxlength="4" placeholder="CODE" autocapitalize="characters" spellcheck="false">
+        <button id="join">Join</button>
+      </div>
+      <p id="home-error" class="error" role="alert"></p>
+    </section>
+
+    <section id="lobby" class="screen" hidden>
+      <h2>Room <span id="room-code" class="code"></span></h2>
+      <p class="sub">Share this link: <a id="share" href="#"></a> <button id="copy" class="small">Copy</button></p>
+      <ul id="members" class="members"></ul>
+      <div id="host-controls" class="row">
+        <button id="add-bot">Add bot</button>
+        <button id="start" class="primary">Start game</button>
+      </div>
+      <p id="lobby-wait" class="sub">Waiting for the host to start…</p>
+      <button id="leave-lobby" class="small ghost">Leave room</button>
+      <p id="lobby-error" class="error" role="alert"></p>
+    </section>
+
+    <section id="game" class="screen" hidden>
+      <div class="board-wrap">
+        <div id="board3d" class="board3d">
+          <canvas id="board-canvas" aria-label="3D game board. Drag to rotate, scroll or pinch to zoom, tap a space for details."></canvas>
+        </div>
+        <div id="board" class="board" aria-label="Game board" hidden></div>
+        <div class="board-tools">
+          <button id="reset-view" class="small" title="Reset camera">Reset view</button>
+          <button id="toggle-view" class="small">2D view</button>
+        </div>
+      </div>
+      <aside class="side">
+        <div id="status" class="status"></div>
+        <div id="actions" class="actions"></div>
+        <p id="game-error" class="error" role="alert"></p>
+        <div id="space-info" class="space-info" hidden></div>
+        <ul id="players" class="players"></ul>
+        <details id="manage">
+          <summary>My properties</summary>
+          <div id="mine"></div>
+        </details>
+        <details id="trade-box">
+          <summary>Propose a trade</summary>
+          <form id="trade-form"></form>
+        </details>
+        <ol id="log" class="log"></ol>
+        <form id="chat-form" class="row">
+          <input id="chat-input" maxlength="200" placeholder="Say something…" autocomplete="off">
+          <button>Send</button>
+        </form>
+      </aside>
+    </section>
+  </main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

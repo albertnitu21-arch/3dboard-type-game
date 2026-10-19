@@ -1,0 +1,124 @@
+# Estate
+
+An original Monopoly-style property trading game for 2–8 players in the browser:
+a rules engine, a multiplayer server, and a simple web client. **No dependencies**:
+only Node.js 20 or newer is needed.
+
+```bash
+npm start            # server + web client on http://localhost:3000  (PORT=8080 npm start to change)
+npm test             # 63 tests: rules, bot-vs-bot games, and real HTTP clients
+npm run sim -- 50 4  # 50 bot games with 4 players, prints stats
+```
+
+The board is 3D: drag to rotate (one finger on phones), scroll or pinch to zoom,
+and tap any space to see its rents and owner. Dice tumble in the middle on every
+roll and tokens hop square by square; your buttons appear once the move has
+played out. A **2D view** button switches to a flat board (also used
+automatically on devices without WebGL).
+
+Open the page, create a room, and share the link (or the 4-letter code). The
+host can add bots, remove players and start the game. Reloading the page or
+losing signal puts you back in your seat. If someone drops out mid-game, the host
+can press **Bot plays** to have a bot take their turns until they return.
+
+## Hosting it for free
+
+The server is a plain Node process, so any Node host works:
+
+- **Render** (free web service): build command `npm install`, start command `npm start`.
+- **Fly.io**, **Railway**, or a $5/month VPS: same idea, `npm start`.
+
+The server serves the web page too, so one deploy is all you need. Free hosts
+usually sleep when idle, so the first visit can take 30–60 seconds.
+
+Rooms live in memory: a server restart ends running games. That's fine for
+friends' games. Save `room.state` (plain JSON) to a file or database if you
+want games to survive restarts.
+
+If you later host the page somewhere else (for example, a 3D client on
+Cloudflare Pages), set `API` at the top of `public/app.js` to the server URL and
+set `CORS_ORIGIN` on the server to your page's origin.
+
+## How it fits together
+
+```
+src/        rules engine (pure functions, runs in Node and the browser)
+  engine.js   state machine: applyAction(state, action) -> { state, events }
+  board.js    spaces, colours, prices, rents: rename things here
+  cards.js    both card decks as data
+  bot.js      bot player (empty seats, autoplay, tests)
+server/
+  rooms.js        rooms, seats, host controls, bots (no networking)
+  game-server.js  HTTP API + live updates + static files
+public/     web client
+  app.js      lobby, side panel, animation queue, 2D fallback board
+  board3d.js  3D board on plain WebGL: board texture, tokens, houses, dice, camera
+test/       engine, simulation and server tests
+```
+
+The server is the only place the rules run. Clients send intentions ("roll",
+"buy", "bid 120") and get the new state back. Each seat has a secret token; the
+server decides who is acting, so players can't move for each other or fake dice.
+Clients never see the dice generator or the card order.
+
+### The 3D board
+
+`public/board3d.js` has no dependencies. The board face is drawn onto a canvas
+(names, prices, owner colours, mortgages) and used as a texture, so renaming
+spaces in `src/board.js` updates the 3D board automatically. Tokens, houses,
+hotels and dice are simple generated shapes. To use detailed models from Blender
+later, port this file to Three.js and load `.glb` models; the rest of the client
+only calls `sync(state)`, `play(events)`, `onSpace` and `resetView()`.
+
+Bots wait 1.5 s between moves so the animations can keep up. If updates pile up
+(for example, after the tab was in the background), animations speed up to
+catch up.
+
+### HTTP API
+
+| Request | Body | Result |
+|---|---|---|
+| `POST /api/rooms` | `{ name }` | `{ code, id, token }` |
+| `POST /api/rooms/:code/join` | `{ name }` or `{ token }` to rejoin | `{ code, id, token }` |
+| `GET /api/rooms/:code/events?token=…` | | live event stream |
+| `POST /api/rooms/:code/action` | `{ token, action: { type, … } }` | `{ ok }` |
+| `POST /api/rooms/:code/host` | `{ token, op, target? }` (`add_bot`, `kick`, `start`, `takeover`) | `{ ok }` |
+| `POST /api/rooms/:code/chat` | `{ token, text }` | `{ ok }` |
+| `POST /api/rooms/:code/leave` | `{ token }` | `{ ok }` |
+
+Errors come back as `{ error, message }` with a matching status code
+(`not_your_turn`, `insufficient_cash`, `room_full`, …).
+
+The live stream uses server-sent events (`lobby`, `state`, `chat`, `kicked`). A
+`state` message carries the public game state, the actions you may take now
+(`legal`), and what just happened (`events`) so a client can animate it.
+`server/rooms.js` doesn't depend on the transport, so switching to WebSockets
+later only means replacing `game-server.js`.
+
+### Game actions
+
+| Phase | Who | Actions |
+|---|---|---|
+| `roll` | current | `roll`, `pay_jail_fine`, `use_jail_card` |
+| `buy` | current | `buy`, `decline` (starts an auction) |
+| `auction` | next bidder | `bid {amount}`, `pass` |
+| `debt` | current | `pay_debt`, `declare_bankruptcy` |
+| `post_roll` | current | `end_turn` |
+| `trade` | partner / proposer | `accept_trade`, `decline_trade` / `cancel_trade` |
+
+Management (own turn): `build {pos}`, `sell_building {pos}`, `mortgage {pos}`,
+`unmortgage {pos}`, `propose_trade {to, give: {cash, props, jailCards}, get: {…}}`.
+
+## Rules implemented
+
+Dice and doubles (three doubles = jail), salary for passing Start, buying,
+auctions, rent (set bonus, houses/hotels, stations, utilities), taxes, two card
+decks (including keepable jail cards), jail (fine, card, doubles, forced fine on
+the third try), even building/selling with a limited bank supply, mortgages,
+debt with raise-money-then-pay, bankruptcy to a player or the bank, trading, and a
+winner when one player is left.
+
+**Deliberate simplifications:** managing and trading only on your own turn;
+mortgaged properties change hands without the 10% fee; bankruptcy to the bank
+returns properties unowned (no auction); "collect from everyone" cards take only
+what each player holds; no Free Parking jackpot.
