@@ -804,6 +804,11 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   const SIDE_YAW = [-Math.PI / 2, Math.PI, Math.PI / 2, 0];
   const SIDE_DIR = [[-1, 0], [0, -1], [1, 0], [0, 1]];
   const sideOf = (pos) => Math.floor(((pos % 40) + 40) % 40 / 10);
+  /** Size and height of the landing gem (a little larger when the camera is far). */
+  const gemPose = (l) => {
+    const s = l.alpha * Math.min(1.35, Math.max(1, cam.r / 11));
+    return { s, y: 0.42 * s + 0.2 + 0.05 * Math.sin(lastNow / 380) };
+  };
   const cellCenter = (pos) => {
     const [x0, y0, x1, y1] = frameRect(pos % 10);
     return frameToWorld(sideOf(pos), (x0 + x1) / 2, (y0 + y1) / 2);
@@ -893,15 +898,13 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     }
     if (flying) draw(M.card[flying.deck], trs(flying.p, flying.q, [CARD_W, CARD_T * 1.5, CARD_D]), [1, 1, 1], cardTex, { spec: 0.3 });
     if (landing && landing.alpha > 0.02) {
-      // a bobbing arrow in the player's colour pointing at the landing square
+      // a small gem in the player's colour floating over the landing square
       const [cx, cz] = cellCenter(landing.pos);
-      const bob = 0.12 * Math.sin(lastNow / 220);
-      // bigger when the camera is far away, so it reads in the overview too
-      const sc = landing.alpha * Math.min(1.9, Math.max(1, cam.r / 8));
-      const down = quat.axis([1, 0, 0], Math.PI);
-      const spin = quat.axis([0, 1, 0], lastNow / 600);
-      draw(M.cone, trs([cx, 0.5 + 0.45 * sc + bob, cz], quat.mul(spin, down), [0.46 * sc, 0.46 * sc, 0.46 * sc]), landing.color, null, { spec: 0.5 });
-      draw(M.cyl, trs([cx, 0.5 + 0.45 * sc + bob, cz], spin, [0.2 * sc, 0.32 * sc, 0.2 * sc]), landing.color, null, { spec: 0.5 });
+      const g = gemPose(landing);
+      const spin = quat.axis([0, 1, 0], lastNow / 900);
+      const light = landing.color.map((c) => Math.min(1, c * 0.55 + 0.5));
+      draw(M.cone, trs([cx, g.y, cz], spin, [g.s * 0.2, g.s * 0.11, g.s * 0.2]), light, null, { spec: 0.9 });
+      draw(M.cone, trs([cx, g.y, cz], quat.mul(spin, quat.axis([1, 0, 0], Math.PI)), [g.s * 0.2, g.s * 0.2, g.s * 0.2]), landing.color, null, { spec: 0.9 });
     }
 
     // transparent: shadows, rings, selection
@@ -935,6 +938,8 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
       const [cx, cz] = cellCenter(pos);
       const q = quat.axis([0, 1, 0], (-k * Math.PI) / 2);
       const pulse = 0.85 + 0.15 * Math.sin(lastNow / 160);
+      const gp = gemPose(landing);
+      draw(M.plane, trs([cx, 0.007, cz], undefined, [0.36 * gp.s, 1, 0.36 * gp.s]), [1, 1, 1, 0.5 * landing.alpha], shadowTex, { lit: false });
       // solid wash of the player's colour over the square
       draw(M.plane, trs([cx, 0.0055, cz], q, [x1 - x0, 1, y1 - y0]), [...landing.color, 0.55 * landing.alpha], null, { lit: false });
       // bright outline in the same colour
