@@ -524,7 +524,7 @@ function renderBoard() {
     prop?.owner ? el('span', { class: 'owner', style: `background:${colorOf(prop.owner)}`, title: `Owned by ${nameOf(prop.owner)}` }) : null);
   });
   const center = el('div', { class: 'center' },
-    el('div', { class: 'title' }, 'Hunger Estates'),
+    el('div', { class: 'title' }, 'GURTPOLY'),
     state.dice ? el('div', { class: 'dice' }, DIE[state.dice[0]] + DIE[state.dice[1]]) : null,
     el('div', { class: 'msg' }, last ?? ''));
   $('board').replaceChildren(...cells, center);

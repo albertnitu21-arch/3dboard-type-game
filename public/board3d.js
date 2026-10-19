@@ -431,14 +431,14 @@ function drawBoardTexture(cnv, ctx) {
   g.textAlign = 'center';
   g.textBaseline = 'middle';
   // the title in the middle of the board, sized to fit between the card piles
-  const title = ['HUNGER', 'ESTATES'];
-  let ts = 1.05;
+  const title = ['GURTPOLY'];
+  let ts = 1.5;
   g.font = `900 ${ts * PX}px ${FONT}`;
   while (title.some((t) => g.measureText(t).width > 6.4 * PX) && ts > 0.5) {
     ts -= 0.05;
     g.font = `900 ${ts * PX}px ${FONT}`;
   }
-  title.forEach((t, i) => g.fillText(t, 0, (i - 0.5) * ts * 1.02 * PX));
+  title.forEach((t, i) => g.fillText(t, 0, (i - (title.length - 1) / 2) * ts * 1.02 * PX));
   for (const [dy, label, color] of [[-2.6, 'FORTUNE', '#d9822b'], [2.6, 'COMMUNITY FUND', '#8a5a2b']]) {
     g.save();
     g.translate(0, dy * PX);
