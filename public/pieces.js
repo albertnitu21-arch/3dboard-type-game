@@ -116,7 +116,10 @@ export const PIECES = [
   },
 ];
 
-/** Seat ids are p1, p2, ... so pieces stay the same in the lobby and the game. */
+export const PIECE_KEYS = PIECES.map((p) => p.key);
+export const pieceByKey = (key) => PIECES.find((p) => p.key === key) ?? null;
+
+/** Fallback when no piece was chosen: seat ids are p1, p2, ... */
 export function pieceFor(id) {
   const n = Number(String(id).replace(/\D/g, '')) || 1;
   return PIECES[(n - 1) % PIECES.length];

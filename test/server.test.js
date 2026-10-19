@@ -311,6 +311,35 @@ test('a drawn card waits for the drawer to tap OK, and bots wait too', async () 
   }
 });
 
+test('players choose their own piece in the lobby; each piece only once', async () => {
+  const ctx = await startServer();
+  try {
+    const host = (await post(ctx.base, '/api/rooms', { name: 'Ana' })).body;
+    const bob = (await post(ctx.base, `/api/rooms/${host.code}/join`, { name: 'Bob' })).body;
+    await post(ctx.base, `/api/rooms/${host.code}/host`, { token: host.token, op: 'add_bot' });
+    const room = ctx.lobby.get(host.code);
+    const pieces = () => Object.fromEntries(room.info().members.map((m) => [m.id, m.piece]));
+    // Everyone starts with a different piece.
+    assert.equal(new Set(Object.values(pieces())).size, 3);
+    const pick = (who, piece) => post(ctx.base, `/api/rooms/${host.code}/piece`, { token: who.token, piece });
+    assert.equal((await pick(host, 'ufo')).status, 200);
+    assert.equal(pieces()[host.id], 'ufo');
+    const taken = await pick(bob, 'ufo');
+    assert.equal(taken.status, 409);
+    assert.equal(taken.body.error, 'piece_taken');
+    assert.equal((await pick(bob, 'banana')).body.error, 'bad_piece');
+    assert.equal((await pick(bob, 'cactus')).status, 200);
+    // A new player gets a free piece.
+    const cat = (await post(ctx.base, `/api/rooms/${host.code}/join`, { name: 'Cat' })).body;
+    assert.ok(!['ufo', 'cactus'].includes(pieces()[cat.id]));
+    await post(ctx.base, `/api/rooms/${host.code}/host`, { token: host.token, op: 'start' });
+    assert.equal((await pick(host, 'duck')).body.error, 'game_started');
+    assert.equal(pieces()[host.id], 'ufo');
+  } finally {
+    await ctx.stop();
+  }
+});
+
 test('the web client and the engine modules are served', async () => {
   const ctx = await startServer();
   try {

@@ -6,7 +6,7 @@ import { deedCard } from './deeds.js';
 import { createBoard3D } from './board3d.js';
 import { createTradeUI } from './trade.js';
 import { createMoneyUI } from './money.js';
-import { pieceFor } from './pieces.js';
+import { PIECES, pieceFor, pieceByKey } from './pieces.js';
 
 const $ = (id) => document.getElementById(id);
 const API = ''; // same origin; set to the server URL if the page is hosted elsewhere
@@ -160,7 +160,7 @@ function checkVersion(v) {
 let board3d = null;
 let use3d = true;
 try {
-  board3d = createBoard3D($('board-canvas'), { board: BOARD, groups: GROUPS, colorOf: (id) => colorOf(id), nameOf: (id) => nameOf(id) });
+  board3d = createBoard3D($('board-canvas'), { board: BOARD, groups: GROUPS, colorOf: (id) => colorOf(id), nameOf: (id) => nameOf(id), pieceOf: (id) => pieceOf(id) });
 } catch (err) {
   console.warn('3D board unavailable:', err);
 }
@@ -349,6 +349,8 @@ const nameOf = (id) => game?.state.players.find((p) => p.id === id)?.name
 // Colours follow seat ids (p1, p2, ...) so they match between lobby and game.
 const colorOf = (id) => COLORS[(Number(String(id).slice(1)) - 1 + COLORS.length) % COLORS.length] ?? COLORS[0];
 const sp = (pos) => BOARD[pos].name;
+/** The piece a player picked in the lobby (or a default one). */
+const pieceOf = (id) => pieceByKey(lobby?.members.find((m) => m.id === id)?.piece) ?? pieceFor(id);
 
 function describe(e) {
   switch (e.type) {
@@ -419,15 +421,43 @@ function renderLobby() {
   const isHost = lobby.hostId === session.id;
   $('members').replaceChildren(...lobby.members.map((m) => el('li', {},
     el('span', { class: 'dot', style: `background:${colorOf(m.id)}` }),
-    el('span', { class: 'piece', title: pieceFor(m.id).name }, pieceFor(m.id).emoji),
+    el('span', { class: 'piece', title: pieceOf(m.id).name }, pieceOf(m.id).emoji),
     el('span', { class: 'grow' }, m.name, m.id === session.id ? ' (you)' : ''),
     el('span', { class: 'tag' }, m.bot ? 'bot' : m.id === lobby.hostId ? 'host' : m.connected ? '' : 'offline'),
     isHost && m.id !== session.id ? el('button', { class: 'small', onclick: () => host('kick', m.id) }, 'Remove') : null,
   )));
+  renderPiecePicker();
   $('host-controls').hidden = !isHost;
   $('lobby-wait').hidden = isHost;
   $('add-bot').disabled = lobby.members.length >= 8;
   $('start').disabled = lobby.members.length < 2;
+}
+
+function renderPiecePicker() {
+  const mine = lobby.members.find((m) => m.id === session.id)?.piece;
+  const owners = new Map(lobby.members.map((m) => [m.piece, m]));
+  $('piece-picker').replaceChildren(...PIECES.map((p) => {
+    const owner = owners.get(p.key);
+    const isMine = p.key === mine;
+    const takenByOther = owner && owner.id !== session.id;
+    return el('button', {
+      type: 'button',
+      class: `pick${isMine ? ' on' : ''}${takenByOther ? ' taken' : ''}`,
+      role: 'radio',
+      'aria-checked': String(isMine),
+      disabled: takenByOther || null,
+      title: takenByOther ? `${p.name}: taken by ${owner.name}` : p.name,
+      style: owner ? `--owner:${colorOf(owner.id)}` : '',
+      onclick: async () => {
+        $('lobby-error').textContent = '';
+        try { await roomApi('piece', { piece: p.key }); } catch (e) { $('lobby-error').textContent = e.message; }
+      },
+    },
+    el('span', { class: 'pick-emoji' }, p.emoji),
+    el('span', { class: 'pick-name' }, p.name),
+    takenByOther ? el('span', { class: 'pick-owner' }, owner.name) : null,
+    isMine ? el('span', { class: 'pick-owner' }, 'You') : null);
+  }));
 }
 
 function gridArea(pos) {
@@ -529,7 +559,7 @@ function renderSide() {
     const offline = m && !m.bot && !m.connected && !m.autoplay;
     return el('li', { class: `${pl.id === cur().id ? 'turn' : ''}${pl.bankrupt ? ' out' : ''}`, 'data-flash': '' },
       el('span', { class: 'dot', style: `background:${colorOf(pl.id)}` }),
-      el('span', { class: 'piece', title: pieceFor(pl.id).name }, pieceFor(pl.id).emoji),
+      el('span', { class: 'piece', title: pieceOf(pl.id).name }, pieceOf(pl.id).emoji),
       el('span', { class: 'grow' }, pl.name, pl.id === session.id ? ' (you)' : '', pl.inJail ? ' 🔒' : ''),
       el('span', { class: 'tag' }, m?.bot ? 'bot' : m?.autoplay ? 'auto' : offline ? 'offline' : ''),
       isHost && offline && !pl.bankrupt ? el('button', { class: 'small', onclick: () => host('takeover', pl.id) }, 'Bot plays') : null,

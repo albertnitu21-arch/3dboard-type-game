@@ -577,7 +577,7 @@ function hexToRgb(hex) {
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }
 
-export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
+export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf = pieceFor }) {
   const gl = canvas.getContext('webgl', { antialias: true, alpha: false })
     || canvas.getContext('experimental-webgl', { antialias: true, alpha: false });
   if (!gl) return null;
@@ -780,7 +780,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
 
   const pieceColors = new Map();
   function drawPiece(id, t) {
-    const piece = pieceFor(id);
+    const piece = pieceOf(id);
     const base = trs([t.x, t.lift, t.z], quat.axis([0, 1, 0], t.yaw ?? 0), 1.15);
     const dark = t.color.map((c) => c * 0.62);
     for (const [shape, at, sc, col, rot] of piece.parts) {

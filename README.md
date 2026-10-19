@@ -16,8 +16,8 @@ roll and tokens hop square by square; your buttons appear once the move has
 played out. A **2D view** button switches to a flat board (also used
 automatically on devices without WebGL).
 
-**Pieces and camera:** each player gets one of eight pieces (rubber duck, rocket,
-snowman, mushroom, robot, ice cream, cactus, UFO) in their colour; they're defined
+**Pieces and camera:** in the lobby each player picks one of eight pieces (rubber duck, rocket,
+snowman, mushroom, robot, ice cream, cactus, UFO), shown in their colour; each piece can be taken once and they are defined
 in `public/pieces.js`. The **Follow** button switches to a third-person camera
 that rides behind whoever's turn it is; **Overview** goes back to the whole
 board. When a piece moves, the squares it will cross glow in its colour (the

@@ -351,3 +351,22 @@ button.deed:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.5
   background: var(--ink); color: var(--bg); box-shadow: 0 8px 30px rgba(0,0,0,0.3); font-size: 14px;
   max-width: calc(100vw - 32px);
 }
+
+/* piece picker (lobby) */
+.pick-title { margin: 10px 0 0; font-size: 15px; }
+.piece-picker { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.pick {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 10px 4px 8px; border-radius: 10px; background: var(--panel);
+}
+.pick-emoji { font-size: 30px; line-height: 1.1; transition: transform 0.15s; }
+.pick:hover:not(:disabled) .pick-emoji { transform: scale(1.15) rotate(-6deg); }
+.pick-name { font-size: 12px; font-weight: 600; }
+.pick-owner { font-size: 11px; color: var(--muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.pick.on .pick-owner { color: var(--accent); font-weight: 700; }
+.pick.taken { opacity: 0.55; }
+.pick.taken::after, .pick.on::after {
+  content: ''; position: absolute; top: 6px; right: 6px; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--owner); border: 2px solid rgba(0,0,0,0.2);
+}

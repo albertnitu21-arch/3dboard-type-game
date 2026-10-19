@@ -6,6 +6,7 @@
 //   POST /api/rooms/:code/action    { token, action }        -> { ok }
 //   POST /api/rooms/:code/host      { token, op, target? }   -> { ok }   op: add_bot | kick | start | takeover
 //   POST /api/rooms/:code/card-ok   { token, seq }           -> { ok }   drawer closes the card pop-up
+//   POST /api/rooms/:code/piece     { token, piece }         -> { ok }   choose a piece (lobby only)
 //   POST /api/rooms/:code/chat      { token, text }          -> { ok }
 //   POST /api/rooms/:code/leave     { token }                -> { ok }
 //   GET  /health                                              -> { ok, rooms }
@@ -43,7 +44,7 @@ const MAX_BODY = 16 * 1024;
 export const VERSION = (process.env.RENDER_GIT_COMMIT || '').slice(0, 12) || Date.now().toString(36);
 const VERSIONED = /^\/v\/[A-Za-z0-9]{1,40}(?=\/)/;
 const STATUS = {
-  no_such_room: 404, bad_token: 403, not_host: 403, not_your_turn: 403,
+  piece_taken: 409, no_such_room: 404, bad_token: 403, not_host: 403, not_your_turn: 403,
   room_full: 409, game_started: 409, server_full: 503, body_too_large: 413,
 };
 
@@ -211,6 +212,11 @@ export function createGameServer({ botDelay = 1500, corsOrigin = process.env.COR
       case 'card-ok': {
         const m = auth(room, body.token);
         room.closeCard(m.id, Number.isInteger(body.seq) ? body.seq : null);
+        return send(res, 200, { ok: true });
+      }
+      case 'piece': {
+        const m = auth(room, body.token);
+        room.setPiece(m.id, body.piece);
         return send(res, 200, { ok: true });
       }
       case 'chat': {

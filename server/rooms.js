@@ -11,6 +11,7 @@
 import { randomBytes, randomInt } from 'node:crypto';
 import { createGame, applyAction, getLegalActions, getActor, ACTION_TYPES } from '../src/engine.js';
 import { chooseAction } from '../src/bot.js';
+import { PIECE_KEYS } from '../public/pieces.js';
 
 export class RoomError extends Error {
   constructor(code, message) {
@@ -87,6 +88,7 @@ export class Room {
       bot,
       autoplay: false, // a human seat temporarily played by a bot
       stream: null,
+      piece: this._freePiece(),
     };
     this.members.push(m);
     if (!this.hostId && !bot) this.hostId = m.id;
@@ -113,7 +115,7 @@ export class Room {
       hostId: this.hostId,
       started: this.started,
       members: this.members.map((m) => ({
-        id: m.id, name: m.name, bot: m.bot, autoplay: m.autoplay, connected: m.bot || !!m.stream,
+        id: m.id, name: m.name, bot: m.bot, autoplay: m.autoplay, connected: m.bot || !!m.stream, piece: m.piece,
       })),
     };
   }
@@ -167,6 +169,24 @@ export class Room {
     const used = new Set(this.members.map((m) => m.name));
     const name = BOT_NAMES.map((n) => `Bot ${n}`).find((n) => !used.has(n)) ?? 'Bot';
     this._add(name, { bot: true });
+    this.touched = Date.now();
+    this.broadcastInfo();
+  }
+
+  _freePiece() {
+    const taken = new Set(this.members.map((m) => m.piece));
+    return PIECE_KEYS.find((k) => !taken.has(k)) ?? PIECE_KEYS[0];
+  }
+
+  /** A player picks their piece in the lobby. Each piece can be used once. */
+  setPiece(id, key) {
+    const m = this.member(id);
+    if (!m) bad('no_such_player', 'No such player.');
+    if (this.started) bad('game_started', 'Pieces are chosen before the game starts.');
+    if (!PIECE_KEYS.includes(key)) bad('bad_piece', 'Unknown piece.');
+    const owner = this.members.find((x) => x.piece === key && x !== m);
+    if (owner) bad('piece_taken', `${owner.name} already has that piece.`);
+    m.piece = key;
     this.touched = Date.now();
     this.broadcastInfo();
   }
