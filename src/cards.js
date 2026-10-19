@@ -18,7 +18,7 @@ export const CARDS = Object.fromEntries([
   C('f1', 'fortune', 'Advance to Start. Collect 200.', { type: 'move_to', pos: 0 }),
   C('f2', 'fortune', 'Advance to Negra Arroyo Lane. If you pass Start, collect 200.', { type: 'move_to', pos: 11 }),
   C('f3', 'fortune', "Advance to Trade Center. If you pass Start, collect 200.", { type: 'move_to', pos: 24 }),
-  C('f4', 'fortune', 'Advance to Catalina Heights.', { type: 'move_to', pos: 39 }),
+  C('f4', 'fortune', 'Advance to Mr Laziz Apusului.', { type: 'move_to', pos: 39 }),
   C('f5', 'fortune', 'Take the train to North Station. If you pass Start, collect 200.', { type: 'move_to', pos: 5 }),
   C('f6', 'fortune', 'Advance to the nearest station. If unowned you may buy it; otherwise pay the owner double rent.', { type: 'nearest', kind: 'station' }),
   C('f7', 'fortune', 'Advance to the nearest station. If unowned you may buy it; otherwise pay the owner double rent.', { type: 'nearest', kind: 'station' }),
