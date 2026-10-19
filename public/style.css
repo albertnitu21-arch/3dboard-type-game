@@ -274,3 +274,6 @@ button.deed:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.5
   position: absolute; bottom: 22px; right: 4px; font-size: 8px; font-weight: 900; letter-spacing: 0.08em;
   background: #d9a400; color: #1f221c; padding: 1px 4px; border-radius: 3px;
 }
+.dc-wait { font-size: 13px; color: #6d6a5e; font-style: italic; display: inline-flex; align-items: center; gap: 8px; }
+.dc-wait::before { content: ''; width: 10px; height: 10px; border-radius: 50%; border: 2px solid #c9c0a8; border-top-color: var(--deck); animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }

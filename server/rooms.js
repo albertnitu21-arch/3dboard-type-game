@@ -43,8 +43,12 @@ function cleanName(raw, fallback) {
 }
 
 export class Room {
-  constructor(code, { botDelay = 1500, tradeTimeout = 60_000 } = {}) {
+  constructor(code, { botDelay = 1500, tradeTimeout = 60_000, cardTimeout = 30_000 } = {}) {
     this.code = code;
+    this.cardTimeout = cardTimeout;
+    this.pendingCard = null; // a drawn card everyone sees until the drawer taps OK
+    this.cardSeq = 0;
+    this.cardTimer = null;
     this.botDelay = botDelay;
     this.tradeTimeout = tradeTimeout;
     this.tradeTimer = null;
@@ -143,6 +147,7 @@ export class Room {
       legal: getLegalActions(this.state, m.id),
       events,
       tradeMsLeft: this.tradeDeadline ? Math.max(0, this.tradeDeadline - Date.now()) : null,
+      pendingCard: this.pendingCard,
     });
   }
 
@@ -205,6 +210,7 @@ export class Room {
     if (!m || m.bot) bad('no_such_player', 'No such player.');
     if (m.stream) bad('still_connected', 'That player is still connected.');
     m.autoplay = true;
+    this.closeCard(m.id);
     this.broadcastInfo();
     this.scheduleBot();
   }
@@ -218,6 +224,7 @@ export class Room {
       if (this.hostId === id) this.hostId = this.members.find((x) => !x.bot)?.id ?? null;
     } else {
       m.autoplay = true;
+      this.closeCard(id);
     }
     const stream = m.stream;
     m.stream = null;
@@ -247,8 +254,36 @@ export class Room {
     this.state = state;
     this.touched = Date.now();
     this._watchTrade();
+    const drawn = events.filter((e) => e.type === 'card').pop();
+    if (drawn) this._openCard(drawn);
     this.broadcastState(events);
     this.scheduleBot();
+  }
+
+  /**
+   * A card drawn by a connected human stays on everyone's screen until that
+   * player taps OK (or `cardTimeout` passes). Bots wait meanwhile.
+   */
+  _openCard(ev) {
+    const m = this.member(ev.player);
+    if (!m || m.bot || m.autoplay || !m.stream) return;
+    clearTimeout(this.cardTimer);
+    const seq = ++this.cardSeq;
+    ev.ack = seq; // clients match the OK to this card
+    this.pendingCard = { seq, player: ev.player, deck: ev.deck, id: ev.id, text: ev.text };
+    this.cardTimer = setTimeout(() => this.closeCard(ev.player, seq), this.cardTimeout);
+    this.cardTimer.unref?.();
+  }
+
+  /** The drawer tapped OK. Returns false if there was nothing of theirs to close. */
+  closeCard(id, seq = null) {
+    const c = this.pendingCard;
+    if (!c || c.player !== id || (seq != null && seq !== c.seq)) return false;
+    this.pendingCard = null;
+    clearTimeout(this.cardTimer);
+    for (const m of this.members) m.stream?.send('card_closed', { seq: c.seq });
+    this.scheduleBot();
+    return true;
   }
 
   /** An unanswered trade offer blocks the game, so it expires after `tradeTimeout`. */
@@ -275,7 +310,7 @@ export class Room {
   scheduleBot() {
     clearTimeout(this.botTimer);
     this.botTimer = null;
-    if (this.disposed || !this.state || this.state.winner) return;
+    if (this.disposed || !this.state || this.state.winner || this.pendingCard) return;
     const actorId = getActor(this.state);
     const m = actorId && this.member(actorId);
     if (!m || !(m.bot || m.autoplay)) return;
@@ -304,6 +339,7 @@ export class Room {
     this.disposed = true;
     clearTimeout(this.botTimer);
     clearTimeout(this.tradeTimer);
+    clearTimeout(this.cardTimer);
     for (const m of this.members) {
       m.stream?.close();
       m.stream = null;
@@ -312,9 +348,10 @@ export class Room {
 }
 
 export class Lobby {
-  constructor({ botDelay = 1500, tradeTimeout = 60_000, maxRooms = 200, idleMs = 6 * 60 * 60 * 1000 } = {}) {
+  constructor({ botDelay = 1500, tradeTimeout = 60_000, cardTimeout = 30_000, maxRooms = 200, idleMs = 6 * 60 * 60 * 1000 } = {}) {
     this.botDelay = botDelay;
     this.tradeTimeout = tradeTimeout;
+    this.cardTimeout = cardTimeout;
     this.maxRooms = maxRooms;
     this.idleMs = idleMs;
     this.rooms = new Map();
@@ -328,7 +365,7 @@ export class Lobby {
     do {
       code = Array.from({ length: 4 }, () => CODE_CHARS[randomInt(CODE_CHARS.length)]).join('');
     } while (this.rooms.has(code));
-    const room = new Room(code, { botDelay: this.botDelay, tradeTimeout: this.tradeTimeout });
+    const room = new Room(code, { botDelay: this.botDelay, tradeTimeout: this.tradeTimeout, cardTimeout: this.cardTimeout });
     const member = room.join(hostName);
     this.rooms.set(code, room);
     return { room, member };

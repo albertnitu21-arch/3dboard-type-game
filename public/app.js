@@ -104,6 +104,11 @@ function connect() {
     renderLog();
   });
   source.addEventListener('kicked', () => leaveRoom('You were removed from the room.'));
+  source.addEventListener('card_closed', (e) => {
+    const { seq } = JSON.parse(e.data);
+    closedCards.add(seq);
+    if (openCardSeq === seq) closeCard?.();
+  });
   const mine = source;
   source.onerror = () => {
     // EventSource retries on its own unless the server refused the stream. Then check
@@ -162,13 +167,22 @@ const DECK_STYLE = {
   community: { title: 'Community Fund', icon: '◆', cls: 'community' },
 };
 let closeCard = null;
-/** Show a drawn card to everyone. Resolves when it closes (tap, OK, or timeout). */
+let openCardSeq = null;
+const closedCards = new Set(); // cards the drawer has already dismissed
+const shownCards = new Set();
+/**
+ * Show a drawn card to everyone. When a person drew it (`ev.ack` set by the
+ * server), only they get an OK button; everyone else's copy closes when they tap
+ * it. Cards drawn by bots close by themselves. Resolves when the card closes.
+ */
 function showCardPopup(ev, speed = 1) {
   if (document.hidden) return Promise.resolve();
   closeCard?.();
   const box = $('card-popup');
   const d = DECK_STYLE[ev.deck] ?? DECK_STYLE.fortune;
   const mine = ev.player === session?.id;
+  const ack = ev.ack ?? null;
+  if (ack) shownCards.add(ack);
   return new Promise((resolve) => {
     let done = false;
     const finish = () => {
@@ -178,21 +192,38 @@ function showCardPopup(ev, speed = 1) {
       box.hidden = true;
       box.replaceChildren();
       closeCard = null;
+      openCardSeq = null;
       resolve();
     };
     closeCard = finish;
-    const ok = el('button', { type: 'button', class: 'primary', onclick: finish }, 'OK');
+    openCardSeq = ack;
+    let footer;
+    let ms;
+    if (ack && mine) {
+      footer = el('button', {
+        type: 'button', class: 'primary',
+        onclick: () => { roomApi('card-ok', { seq: ack }).catch(() => {}); finish(); },
+      }, 'OK');
+      ms = 30000; // the server closes it for everyone after 30 s anyway
+    } else if (ack && !closedCards.has(ack)) {
+      footer = el('div', { class: 'dc-wait' }, `Waiting for ${nameOf(ev.player)} to tap OK…`);
+      ms = 32000;
+    } else {
+      footer = null;
+      ms = (ack ? 1500 : 3500) / speed; // bot card, or already dismissed by the drawer
+    }
     box.replaceChildren(el('div', { class: `drawn-card ${d.cls}`, role: 'dialog', 'aria-live': 'polite', 'aria-label': `${d.title} card` },
       el('div', { class: 'dc-head' }, el('span', { class: 'dc-icon' }, d.icon), el('span', {}, d.title.toUpperCase())),
       el('div', { class: 'dc-who' },
         el('span', { class: 'dot', style: `background:${colorOf(ev.player)}` }),
         mine ? 'You drew' : `${nameOf(ev.player)} drew`),
       el('p', { class: 'dc-text' }, ev.text),
-      ok));
+      footer));
     box.hidden = false;
-    box.onclick = (e) => { if (e.target === box) finish(); };
-    const t = setTimeout(finish, (mine ? 4500 : 3500) / speed);
-    ok.focus({ preventScroll: true });
+    // Only cards nobody has to confirm can be clicked away.
+    box.onclick = (e) => { if (e.target === box && !ack) finish(); };
+    const t = setTimeout(finish, ms);
+    if (footer?.tagName === 'BUTTON') footer.focus({ preventScroll: true });
   });
 }
 
@@ -217,6 +248,11 @@ async function drain() {
       for (const ev of d.events) if (ev.type === 'card' && game) await showCardPopup(ev, speed);
     }
     game = { state: d.state, legal: d.legal, tradeMsLeft: d.tradeMsLeft ?? null, receivedAt: Date.now() };
+    const pc = d.pendingCard;
+    if (pc && !shownCards.has(pc.seq) && !closedCards.has(pc.seq) && !d.events.some((e) => e.type === 'card')) {
+      // e.g. after a reload: the card is still waiting for its OK
+      showCardPopup({ ...pc, type: 'card', ack: pc.seq });
+    }
     for (const ev of d.events) {
       const line = describe(ev);
       if (line) logLines.push({ text: line });

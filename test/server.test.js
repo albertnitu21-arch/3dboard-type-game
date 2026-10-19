@@ -270,6 +270,47 @@ test('any player can offer a trade; unanswered offers expire', async () => {
   }
 });
 
+test('a drawn card waits for the drawer to tap OK, and bots wait too', async () => {
+  const ctx = await startServer({ botDelay: 20, cardTimeout: 5000 });
+  try {
+    const host = (await post(ctx.base, '/api/rooms', { name: 'Ana' })).body;
+    const bob = (await post(ctx.base, `/api/rooms/${host.code}/join`, { name: 'Bob' })).body;
+    await post(ctx.base, `/api/rooms/${host.code}/host`, { token: host.token, op: 'add_bot' });
+    const as = connect(ctx, host.code, host.token);
+    const bs = connect(ctx, host.code, bob.token);
+    await Promise.all([as.ready, bs.ready]);
+    await post(ctx.base, `/api/rooms/${host.code}/host`, { token: host.token, op: 'start' });
+    await bs.wait((e) => e.type === 'state');
+    const room = ctx.lobby.get(host.code);
+    // Ana to move, and her dice land on the first Fortune space (7).
+    room.state.current = room.state.players.findIndex((p) => p.id === host.id);
+    room.state.phase = 'roll';
+    room.state.forcedDice = [[3, 4]];
+    room.state.decks.fortune = ['f15', ...room.state.decks.fortune.filter((x) => x !== 'f15')];
+    await post(ctx.base, `/api/rooms/${host.code}/action`, { token: host.token, action: { type: 'roll' } });
+    const st = (await bs.wait((e) => e.type === 'state' && e.data.events.some((x) => x.type === 'card'))).data;
+    const card = st.events.find((x) => x.type === 'card');
+    assert.ok(card.ack, 'card should need an OK');
+    assert.deepEqual(st.pendingCard, { seq: card.ack, player: host.id, deck: 'fortune', id: 'f15', text: card.text });
+    // Ana ends her turn; the bot is next but must not move while the card is open.
+    await post(ctx.base, `/api/rooms/${host.code}/action`, { token: host.token, action: { type: 'end_turn' } });
+    // (only if it's the bot's turn next; either way nobody moves on their own)
+    await new Promise((r) => setTimeout(r, 300));
+    const turnBefore = room.state.turn;
+    // Bob can't close Ana's card.
+    await post(ctx.base, `/api/rooms/${host.code}/card-ok`, { token: bob.token, seq: card.ack });
+    assert.ok(room.pendingCard, 'only the drawer can close it');
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(room.state.turn, turnBefore);
+    const closed = bs.next((e) => e.type === 'card_closed');
+    await post(ctx.base, `/api/rooms/${host.code}/card-ok`, { token: host.token, seq: card.ack });
+    assert.equal((await closed).data.seq, card.ack);
+    assert.equal(room.pendingCard, null);
+  } finally {
+    await ctx.stop();
+  }
+});
+
 test('the web client and the engine modules are served', async () => {
   const ctx = await startServer();
   try {

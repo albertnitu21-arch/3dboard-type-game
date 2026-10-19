@@ -5,12 +5,13 @@
 //   GET  /api/rooms/:code/events?token=...                    -> server-sent events
 //   POST /api/rooms/:code/action    { token, action }        -> { ok }
 //   POST /api/rooms/:code/host      { token, op, target? }   -> { ok }   op: add_bot | kick | start | takeover
+//   POST /api/rooms/:code/card-ok   { token, seq }           -> { ok }   drawer closes the card pop-up
 //   POST /api/rooms/:code/chat      { token, text }          -> { ok }
 //   POST /api/rooms/:code/leave     { token }                -> { ok }
 //   GET  /health                                              -> { ok, rooms }
 //   GET  /*                         static files from public/ (and /engine/* from src/)
 //
-// Live updates arrive as SSE events: lobby, state, chat, kicked.
+// Live updates arrive as SSE events: lobby, state, chat, kicked, card_closed.
 
 import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
@@ -190,6 +191,11 @@ export function createGameServer({ botDelay = 1500, corsOrigin = process.env.COR
           case 'takeover': room.takeover(m.id, body.target); break;
           default: throw new HttpError(400, 'bad_request', 'Unknown host operation.');
         }
+        return send(res, 200, { ok: true });
+      }
+      case 'card-ok': {
+        const m = auth(room, body.token);
+        room.closeCard(m.id, Number.isInteger(body.seq) ? body.seq : null);
         return send(res, 200, { ok: true });
       }
       case 'chat': {
