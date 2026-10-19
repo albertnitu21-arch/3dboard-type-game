@@ -91,6 +91,7 @@ function resetGameView() {
 }
 
 function leaveRoom(message = '') {
+  fullMode = null;
   setFull(false);
   source?.close();
   source = null;
@@ -791,16 +792,20 @@ $('bg-mode').onchange = (e) => { setBackground(e.target.value); e.target.blur();
 try { setBackground(localStorage.getItem('estate-bg') || 'classic'); } catch { setBackground('classic'); }
 
 let realFullscreen = false;
-function setFull(on) {
+// on: show the board over the whole page; real: also ask the browser for true
+// fullscreen (hides tabs and the address bar). real=false keeps the browser bars.
+function setFull(on, real = true) {
   const was = document.body.classList.contains('full');
   document.body.classList.toggle('full', on);
-  document.body.classList.remove('panel-hidden');
-  $('fullscreen').textContent = on ? '✕ Exit fullscreen' : '⛶ Fullscreen';
-  $('fullscreen').setAttribute('aria-pressed', String(on));
+  if (!was) document.body.classList.remove('panel-hidden');
+  $('fullscreen').textContent = on && real ? '✕ Exit fullscreen' : '⛶ Fullscreen';
+  $('fullscreen').setAttribute('aria-pressed', String(on && real));
+  $('fill-window').textContent = on && !real ? '✕ Exit fill window' : '▣ Fill window';
+  $('fill-window').setAttribute('aria-pressed', String(on && !real));
   $('panel-toggle').hidden = !on;
-  $('panel-toggle').textContent = 'Hide panel';
+  $('panel-toggle').textContent = document.body.classList.contains('panel-hidden') ? 'Show panel' : 'Hide panel';
   requestAnimationFrame(updateViewInset);
-  if (on && !was) {
+  if (on && real && !document.fullscreenElement) {
     // also hide the browser's own bars where allowed (not on every phone)
     const el = document.documentElement;
     const req = el.requestFullscreen || el.webkitRequestFullscreen;
@@ -810,10 +815,16 @@ function setFull(on) {
         if (p?.then) p.then(() => { realFullscreen = true; }).catch(() => {});
       } catch { /* not allowed */ }
     }
-  } else if (!on && was) {
-    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+  } else if (!(on && real) && document.fullscreenElement) {
     realFullscreen = false;
+    document.exitFullscreen?.().catch(() => {});
   }
+  if (!on) realFullscreen = false;
+}
+let fullMode = null; // null | 'screen' | 'window'
+function toggleFull(mode) {
+  fullMode = fullMode === mode ? null : mode;
+  setFull(!!fullMode, fullMode === 'screen');
 }
 function updateViewInset() {
   if (!board3d) return;
@@ -824,7 +835,8 @@ function updateViewInset() {
   board3d.setViewInset(panelShown && wide && side ? side.getBoundingClientRect().width + 24 : 0);
 }
 addEventListener('resize', updateViewInset);
-$('fullscreen').onclick = () => setFull(!document.body.classList.contains('full'));
+$('fullscreen').onclick = () => toggleFull('screen');
+$('fill-window').onclick = () => toggleFull('window');
 $('panel-toggle').onclick = () => {
   const hidden = document.body.classList.toggle('panel-hidden');
   $('panel-toggle').textContent = hidden ? 'Show panel' : 'Hide panel';
@@ -832,11 +844,11 @@ $('panel-toggle').onclick = () => {
 };
 document.addEventListener('fullscreenchange', () => {
   // Esc in the browser's fullscreen also leaves our full-page view
-  if (!document.fullscreenElement && realFullscreen) { realFullscreen = false; setFull(false); }
+  if (!document.fullscreenElement && realFullscreen) { realFullscreen = false; fullMode = null; setFull(false); }
 });
 addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && document.body.classList.contains('full')
-    && $('trade-modal').hidden && $('card-popup').hidden) setFull(false);
+    && $('trade-modal').hidden && $('card-popup').hidden) { fullMode = null; setFull(false); }
 });
 
 // ----------------------------------------------------------------- sound

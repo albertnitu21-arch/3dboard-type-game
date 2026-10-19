@@ -36,8 +36,9 @@ after 60 seconds so the game never gets stuck.
 board. When someone draws one, the top card lifts off the pile and everyone sees
 a pop-up with who drew it and what it says.
 
-**Fullscreen and backgrounds:** **⛶ Fullscreen** makes the board fill the whole
-window (and hides the browser bars where the browser allows); the side panel
+**Fullscreen and backgrounds:** **▣ Fill window** makes the board fill the
+browser window while keeping the tabs and address bar; **⛶ Fullscreen** fills the
+whole screen (and hides the browser bars where the browser allows); the side panel
 floats on top and can be hidden. The 🎨 menu picks the table the board sits on:
 Classic, Picnic, Meadow, Starry night, Candy, Living room (a real wooden table
 with a rug, sofa, window, lamp and bookshelf; the wall nearest the camera is cut
