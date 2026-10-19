@@ -375,9 +375,17 @@ function drawCell(g, pos, i, ctx) {
     g.fillStyle = INK;
     g.textAlign = 'center';
     g.textBaseline = 'top';
-    g.font = `700 ${0.105 * u}px ${FONT}`;
-    const lines = wrap(g, sp.name.toUpperCase(), w * 0.88);
-    lines.slice(0, 3).forEach((ln, n) => g.fillText(ln, (x0 + x1) / 2, y + 0.08 * u + n * 0.125 * u));
+    // shrink long names until every line fits (max 3 lines)
+    let size = 0.105;
+    let lines;
+    for (;;) {
+      g.font = `700 ${size * u}px ${FONT}`;
+      lines = wrap(g, sp.name.toUpperCase(), w * 0.88);
+      const fits = lines.length <= 3 && lines.every((ln) => g.measureText(ln).width <= w * 0.9);
+      if (fits || size <= 0.07) break;
+      size -= 0.005;
+    }
+    lines.slice(0, 3).forEach((ln, n) => g.fillText(ln, (x0 + x1) / 2, y + 0.08 * u + n * size * 1.19 * u));
     if (sp.type !== 'property') drawIcon(g, sp, (x0 + x1) / 2, y0 + 0.82 * u);
     g.textBaseline = 'alphabetic';
     g.font = `600 ${0.11 * u}px ${FONT}`;
