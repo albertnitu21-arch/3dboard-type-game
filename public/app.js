@@ -1,7 +1,8 @@
 // Web client: lobby, side panel, animation queue and the 2D fallback board.
 // The 3D board lives in board3d.js and the trade window in trade.js.
 
-import { BOARD, GROUPS, STATION_RENTS } from '/engine/board.js';
+import { BOARD, GROUPS, GROUP_POSITIONS, STATION_RENTS } from '/engine/board.js';
+import { deedCard } from './deeds.js';
 import { createBoard3D } from './board3d.js';
 import { createTradeUI } from './trade.js';
 
@@ -469,15 +470,47 @@ function renderMine() {
   const { state, legal } = game;
   const owned = Object.keys(state.props).map(Number).filter((pos) => state.props[pos].owner === session.id);
   const can = (type, pos) => legal.some((a) => a.type === type && a.pos === pos);
-  const rows = owned.map((pos) => {
+  const myTurn = cur()?.id === session.id;
+  const ownsSet = (g) => GROUP_POSITIONS[g].every((q) => state.props[q].owner === session.id);
+  let raise = 0;
+  const cards = owned.map((pos) => {
+    const space = BOARD[pos];
     const st = state.props[pos];
-    const b = (type, label) => can(type, pos) ? el('button', { class: 'small', onclick: () => act({ type, pos }) }, label) : null;
-    return el('div', { class: 'prop' },
-      BOARD[pos].group ? el('span', { class: 'dot', style: `background:${GROUPS[BOARD[pos].group].color}` }) : el('span', { class: 'dot' }),
-      el('span', { class: 'grow' }, sp(pos), st.mortgaged ? ' (mortgaged)' : '', st.houses ? ` · ${st.houses === 5 ? 'hotel' : `${st.houses}🏠`}` : ''),
-      b('build', 'Build'), b('sell_building', 'Sell'), b('mortgage', 'Mortgage'), b('unmortgage', 'Pay off'));
+    const full = space.type === 'property' && ownsSet(space.group);
+    const groupBuilt = space.group && GROUP_POSITIONS[space.group].some((q) => state.props[q].houses > 0);
+    if (!st.mortgaged) raise += space.mortgage + (st.houses * (space.houseCost ?? 0)) / 2;
+    const why = (type) => {
+      if (!myTurn) return 'Only on your turn';
+      if (type === 'mortgage' && groupBuilt) return 'Sell the buildings in this set first';
+      if (type === 'unmortgage') return 'Not enough cash';
+      if (type === 'build') return 'Build evenly, with enough cash, and no mortgages in the set';
+      return 'Not possible right now';
+    };
+    const btn = (type, label, cls = '') => {
+      const ok = can(type, pos);
+      return el('button', {
+        type: 'button', class: `small ${cls}`, disabled: !ok || null, title: ok ? '' : why(type),
+        onclick: () => act({ type, pos }),
+      }, label);
+    };
+    const buttons = [];
+    if (st.mortgaged) buttons.push(btn('unmortgage', `Pay off −${Math.ceil(space.mortgage * 1.1)}`, 'primary'));
+    else buttons.push(btn('mortgage', `Mortgage +${space.mortgage}`));
+    if (full) {
+      if (st.houses < 5) buttons.push(btn('build', `${st.houses === 4 ? 'Hotel' : 'House'} −${space.houseCost}`));
+      if (st.houses > 0) buttons.push(btn('sell_building', `Sell ${st.houses === 5 ? 'hotel' : 'house'} +${space.houseCost / 2}`));
+    }
+    const extra = [];
+    if (st.houses) extra.push(el('span', { class: 'deed-bld', title: st.houses === 5 ? 'Hotel' : `${st.houses} house(s)` }, st.houses === 5 ? '🏨' : '🏠'.repeat(st.houses)));
+    if (full) extra.push(el('span', { class: 'deed-set', title: 'You own the full colour set' }, 'SET'));
+    return el('div', { class: 'mycard' },
+      deedCard(state, pos, { onclick: () => showSpace(pos), pressed: false, title: `${space.name}: tap for full details`, extra }),
+      el('div', { class: 'mycard-btns' }, buttons));
   });
-  $('mine').replaceChildren(...(rows.length ? rows : [el('div', { class: 'tag' }, 'Nothing yet.')]));
+  const head = owned.length
+    ? el('div', { class: 'tag' }, `${owned.length} propert${owned.length === 1 ? 'y' : 'ies'} · you could raise about ¤${raise.toLocaleString()} by mortgaging and selling buildings`)
+    : null;
+  $('mine').replaceChildren(...(cards.length ? [head, el('div', { class: 'mycards' }, cards)] : [el('div', { class: 'tag' }, 'Nothing yet. Properties you buy show up here as cards.')]));
 }
 
 function renderLog() {

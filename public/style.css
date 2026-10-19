@@ -260,3 +260,17 @@ button.deed:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.5
 }
 @media (prefers-reduced-motion: reduce) { .drawn-card { animation: none; } }
 @media (max-width: 760px) { .value > .tag { display: none; } }
+
+/* My properties as cards */
+#manage > summary { margin-bottom: 6px; }
+.mycards { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 12px 8px; margin-top: 8px; }
+.mycard { display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
+.mycard .deed { width: 100%; }
+.mycard-btns { display: flex; flex-direction: column; gap: 4px; }
+.mycard-btns button { width: 100%; padding: 5px 4px; font-size: 12px; font-weight: 600; }
+.mycard-btns button:disabled { opacity: 0.4; }
+.deed-bld { position: absolute; left: 4px; right: 4px; top: -11px; font-size: 12px; letter-spacing: -2px; text-align: center; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.3)); }
+.deed-set {
+  position: absolute; bottom: 22px; right: 4px; font-size: 8px; font-weight: 900; letter-spacing: 0.08em;
+  background: #d9a400; color: #1f221c; padding: 1px 4px; border-radius: 3px;
+}
