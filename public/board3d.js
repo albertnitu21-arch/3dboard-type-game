@@ -144,6 +144,21 @@ function latheGeo(profile, seg = 24) {
   return { pos, nor, uv, idx };
 }
 
+/** Unit triangular prism: base 1 x 1 at y = 0, ridge along x at y = 1 (a roof). */
+function roofGeo() {
+  const k = Math.hypot(0.5, 1);
+  const fn = [0, 0.5 / k, 1 / k], bn = [0, 0.5 / k, -1 / k];
+  const pos = [
+    -0.5, 0, 0.5, 0.5, 0, 0.5, 0.5, 1, 0, -0.5, 1, 0,      // front slope
+    0.5, 0, -0.5, -0.5, 0, -0.5, -0.5, 1, 0, 0.5, 1, 0,    // back slope
+    0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 1, 0,                  // right gable
+    -0.5, 0, -0.5, -0.5, 0, 0.5, -0.5, 1, 0,               // left gable
+  ];
+  const nor = [...fn, ...fn, ...fn, ...fn, ...bn, ...bn, ...bn, ...bn, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0];
+  const uv = new Array((pos.length / 3) * 2).fill(0);
+  return { pos, nor, uv, idx: [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 11, 12, 13] };
+}
+
 function planeGeo() {
   return {
     pos: [-0.5, 0, -0.5, 0.5, 0, -0.5, 0.5, 0, 0.5, -0.5, 0, 0.5],
@@ -604,6 +619,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
 
   const M = {
     plane: mesh(planeGeo()),
+    roof: mesh(roofGeo()),
     slab: mesh(boxGeo(L, 0.3, L)),
     box: mesh(boxGeo(1, 1, 1)),
     pawn: mesh(latheGeo(pawnProfile(), 28)),
@@ -660,7 +676,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
     return Math.min(Math.max(6.7 / (th * aspect), 5.6 / th, 9), 34);
   }
   function camera() {
-    const target = [0, 0, 0.35];
+    const target = cam.target ?? [0, 0, 0.35];
     const cp = Math.cos(cam.phi);
     const eye = [
       target[0] + cam.r * Math.sin(cam.theta) * cp,
@@ -673,7 +689,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
     return { eye, view, proj: perspective(fov, aspect, 0.5, 200), fov, aspect };
   }
   api.resetView = () => {
-    cam.theta = 0; cam.phi = 0.95; cam.r = fitRadius(); cam.auto = true; dirty = true;
+    cam.theta = 0; cam.phi = 0.95; cam.r = fitRadius(); cam.auto = true; cam.target = null; dirty = true;
   };
 
   // ----- drawing
@@ -694,22 +710,48 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
     gl.drawElements(gl.TRIANGLES, m.count, gl.UNSIGNED_SHORT, 0);
   }
 
+  // Building animations: pos -> { from, to, t } while a house/hotel is being added or removed.
+  const buildAnims = new Map();
+  const easeOutBounce = (x) => {
+    const n = 7.5625, d = 1 / 2.75;
+    if (x < d) return n * x * x;
+    if (x < 2 * d) return n * (x -= 1.5 * d) * x + 0.75;
+    if (x < 2.5 * d) return n * (x -= 2.25 * d) * x + 0.9375;
+    return n * (x -= 2.625 * d) * x + 0.984375;
+  };
+  const dropIn = (t) => ({ s: 0.55 + 0.45 * Math.min(1, t * 1.6), dy: (1 - easeOutBounce(t)) * 1.3 });
+  const fadeOut = (t) => ({ s: Math.max(0, 1 - t), dy: t * 0.35 });
+
   function buildingList() {
     const out = [];
     if (!state) return out;
     for (const [p, st] of Object.entries(state.props)) {
       const pos = Number(p);
-      if (!st.houses) continue;
+      const anim = buildAnims.get(pos);
+      if (!st.houses && !anim) continue;
       const k = Math.floor(pos / 10), i = pos % 10;
       const [x0, y0, x1] = frameRect(i);
       const fy = y0 + BAND / 2;
       const yaw = (-k * Math.PI) / 2;
-      if (st.houses === 5) {
-        out.push({ hotel: true, at: frameToWorld(k, (x0 + x1) / 2, fy), yaw });
+      const house = (h, fx = {}) => out.push({ hotel: false, at: frameToWorld(k, x0 + W * (0.17 + 0.22 * h), fy), yaw, s: 1, dy: 0, ...fx });
+      const hotel = (fx = {}) => out.push({ hotel: true, at: frameToWorld(k, (x0 + x1) / 2, fy), yaw, s: 1, dy: 0, ...fx });
+      if (!anim) {
+        if (st.houses === 5) hotel();
+        else for (let h = 0; h < st.houses; h++) house(h);
+        continue;
+      }
+      const { from, to, t } = anim;
+      const split = 0.4; // hotel swaps: first the old buildings go, then the new ones arrive
+      if (to === 5) {
+        if (t < split) for (let h = 0; h < 4; h++) house(h, fadeOut(t / split));
+        else hotel(dropIn((t - split) / (1 - split)));
+      } else if (from === 5) {
+        if (t < split) hotel(fadeOut(t / split));
+        else for (let h = 0; h < 4; h++) house(h, { s: Math.min(1, (t - split) / (1 - split) * 1.4), dy: 0 });
+      } else if (to > from) {
+        for (let h = 0; h < to; h++) house(h, h === to - 1 ? dropIn(t) : {});
       } else {
-        for (let h = 0; h < st.houses; h++) {
-          out.push({ hotel: false, at: frameToWorld(k, x0 + W * (0.17 + 0.22 * h), fy), yaw });
-        }
+        for (let h = 0; h < from; h++) house(h, h === from - 1 ? fadeOut(t) : {});
       }
     }
     return out;
@@ -733,13 +775,19 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
     draw(M.slab, trs([0, -0.15, 0]), [0.16, 0.2, 0.17]);
     draw(M.plane, trs([0, 0.001, 0], undefined, [L, 1, L]), [1, 1, 1], boardTex);
 
-    for (const b of buildingList()) {
+    const buildings = buildingList();
+    for (const b of buildings) {
+      if (b.s <= 0.01) continue;
       const q = quat.axis([0, 1, 0], b.yaw);
+      const sc = (v) => v.map((x) => x * b.s);
+      const y = (v) => v * b.s + b.dy;
       if (b.hotel) {
-        draw(M.box, trs([b.at[0], 0.11, b.at[1]], q, [0.44, 0.2, 0.17]), [0.78, 0.2, 0.17], null, { spec: 0.2 });
+        draw(M.box, trs([b.at[0], y(0.085), b.at[1]], q, sc([0.44, 0.17, 0.18])), [0.8, 0.2, 0.16], null, { spec: 0.25 });
+        draw(M.roof, trs([b.at[0], y(0.17), b.at[1]], q, sc([0.47, 0.09, 0.2])), [0.58, 0.12, 0.1], null, { spec: 0.2 });
+        draw(M.box, trs([b.at[0], y(0.085), b.at[1] ], q, sc([0.08, 0.1, 0.185])), [0.95, 0.88, 0.62], null, { spec: 0.1 });
       } else {
-        draw(M.box, trs([b.at[0], 0.065, b.at[1]], q, [0.15, 0.13, 0.15]), [0.18, 0.62, 0.32], null, { spec: 0.2 });
-        draw(M.box, trs([b.at[0], 0.13, b.at[1]], quat.mul(q, quat.axis([1, 0, 0], Math.PI / 4)), [0.16, 0.1, 0.1]), [0.13, 0.48, 0.25], null, { spec: 0.2 });
+        draw(M.box, trs([b.at[0], y(0.055), b.at[1]], q, sc([0.15, 0.11, 0.15])), [0.2, 0.64, 0.34], null, { spec: 0.25 });
+        draw(M.roof, trs([b.at[0], y(0.11), b.at[1]], q, sc([0.175, 0.08, 0.17])), [0.11, 0.42, 0.22], null, { spec: 0.2 });
       }
     }
 
@@ -772,6 +820,11 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
     for (const d of dice) {
       const s = DIE * 1.6 * (1 + (d.p[1] - DIE / 2) * 0.35);
       draw(M.plane, trs([d.p[0] + 0.06, 0.003, d.p[2] + 0.06], undefined, [s, 1, s]), [1, 1, 1, 0.9 / (1 + (d.p[1] - DIE / 2) * 0.8)], shadowTex, { lit: false });
+    }
+    for (const b of buildings) {
+      if (b.s <= 0.01) continue;
+      const w = (b.hotel ? 0.62 : 0.26) * b.s * (1 + b.dy * 0.5);
+      draw(M.plane, trs([b.at[0] + 0.03, 0.0025, b.at[1] + 0.03], quat.axis([0, 1, 0], b.yaw), [w, 1, w * (b.hotel ? 0.5 : 1)]), [1, 1, 1, 0.55 / (1 + b.dy * 2)], shadowTex, { lit: false });
     }
     for (const deck of ['fortune', 'community']) {
       const pl = PILE[deck];
@@ -870,6 +923,11 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
     api.onSpace?.(selected);
   }
   api.select = (pos) => { selected = pos; dirty = true; };
+  /** Place the camera (theta = turn around the board, phi = tilt, r = distance). */
+  api.setCamera = ({ theta = cam.theta, phi = cam.phi, r = cam.r, target = cam.target } = {}) => {
+    Object.assign(cam, { theta, phi: Math.min(Math.max(phi, 0.35), 1.5), r, target, auto: false });
+    dirty = true;
+  };
 
   // ----- state sync & animation
   function placeToken(id, t) {
@@ -880,6 +938,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
   let diceShown = false;
   api.sync = (next) => {
     state = next;
+    buildAnims.clear(); // the new state now holds the finished buildings
     if (!diceShown && next.dice && !animating) {
       // first look at a game in progress: show the last roll
       next.dice.forEach((v, i) => { dice[i].q = quat.mul(quat.axis([0, 1, 0], i ? 0.5 : -0.3), FACE_UP[v]); });
@@ -1007,6 +1066,12 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
           await hop(t, 10, true, 0.75 / speed, 2.2);
         } else if (ev.type === 'jail_release' && t) {
           await hop(t, 10, false, 0.3 / speed, 0.5);
+        } else if (ev.type === 'built' || ev.type === 'sold_building') {
+          const to = ev.level;
+          const from = ev.type === 'built' ? to - 1 : to + 1;
+          const anim = { from, to, t: 0 };
+          buildAnims.set(ev.pos, anim);
+          await tween((ev.type === 'built' ? (to === 5 ? 1.1 : 0.75) : 0.55) / speed, (t) => { anim.t = t; });
         } else if (ev.type === 'card') {
           await drawCardAnim(ev, speed);
         } else if (ev.type === 'bought' || ev.type === 'auction_won') {

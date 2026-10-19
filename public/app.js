@@ -546,7 +546,10 @@ function renderMine() {
   const head = owned.length
     ? el('div', { class: 'tag' }, `${owned.length} propert${owned.length === 1 ? 'y' : 'ies'} · you could raise about ¤${raise.toLocaleString()} by mortgaging and selling buildings`)
     : null;
-  $('mine').replaceChildren(...(cards.length ? [head, el('div', { class: 'mycards' }, cards)] : [el('div', { class: 'tag' }, 'Nothing yet. Properties you buy show up here as cards.')]));
+  const supply = el('div', { class: 'tag supply' },
+    'Own every street of a colour to build. Up to 4 houses each, then a hotel. ',
+    el('b', {}, `Bank: ${state.bank.houses} houses, ${state.bank.hotels} hotels left.`));
+  $('mine').replaceChildren(...(cards.length ? [head, el('div', { class: 'mycards' }, cards), supply] : [el('div', { class: 'tag' }, 'Nothing yet. Properties you buy show up here as cards.')]));
 }
 
 function renderLog() {
