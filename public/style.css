@@ -294,16 +294,9 @@ button.deed:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.5
 /* money that moves */
 :root { --money-up: #1f9d55; --money-down: #d23b2f; }
 @media (prefers-color-scheme: dark) { :root { --money-up: #4cd384; --money-down: #ff6b5e; } }
-.wallet {
-  display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px;
-  background: var(--panel); border: 1px solid var(--line);
-}
-.w-label { color: var(--muted); font-size: 13px; flex: 1; }
-.w-amount { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
-.w-cur { font-size: 16px; color: var(--muted); margin-right: 4px; font-weight: 600; }
-.cash, .w-val { transition: color 0.2s; }
-.cash.up, .w-val.up { color: var(--money-up); }
-.cash.down, .w-val.down { color: var(--money-down); }
+.cash { transition: color 0.2s; }
+.cash.up { color: var(--money-up); }
+.cash.down { color: var(--money-down); }
 .flash-up { animation: flash-up 1.1s ease-out; }
 .flash-down { animation: flash-down 1.1s ease-out; }
 @keyframes flash-up { 0% { background: color-mix(in srgb, var(--money-up) 30%, var(--panel)); } 100% { background: var(--panel); } }

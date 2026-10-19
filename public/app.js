@@ -512,16 +512,6 @@ function renderSide() {
       isHost && offline && !pl.bankrupt ? el('button', { class: 'small', onclick: () => host('takeover', pl.id) }, 'Bot plays') : null,
       el('span', { class: `cash ${money.direction(pl.id)}`, 'data-cash': pl.id }, money.value(pl.id)));
   }));
-  const meP = me();
-  $('wallet').hidden = !meP || meP.bankrupt;
-  if (meP && !meP.bankrupt) {
-    $('wallet').replaceChildren(
-      el('span', { class: 'dot', style: `background:${colorOf(meP.id)}` }),
-      el('span', { class: 'w-label' }, 'Your money'),
-      el('span', { class: 'w-amount' }, el('span', { class: 'w-cur' }, '¤'),
-        el('span', { class: `w-val ${money.direction(meP.id)}`, 'data-cash': meP.id }, money.value(meP.id))));
-  }
-
   renderMine();
 }
 
