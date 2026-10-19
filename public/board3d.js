@@ -9,6 +9,8 @@
 // World layout: the board is 11 x 11 units centred on the origin, top face at y = 0,
 // viewed by default from +z. Space 0 (Start) is the near-right corner.
 
+import { pieceFor } from './pieces.js';
+
 const MONEY_EVENTS = new Set(['pay', 'pass_start', 'gain', 'bought', 'auction_won', 'built', 'sold_building', 'mortgaged', 'unmortgaged', 'trade_done']);
 
 const L = 11;          // board size
@@ -498,6 +500,29 @@ function drawCardBacks() {
   return cnv;
 }
 
+/** Glowing outline for a square of the board (drawn a little larger than the square). */
+function glowTexture(w, h, padU) {
+  // w, h: canvas size (powers of two). padU: fraction of the plane that lies outside the square.
+  const cnv = document.createElement('canvas');
+  cnv.width = w; cnv.height = h;
+  const g = cnv.getContext('2d');
+  const px = padU[0] * w, py = padU[1] * h;
+  const r = Math.min(px, py) * 0.9;
+  g.strokeStyle = '#fff';
+  for (const [blur, width, alpha] of [[Math.min(px, py) * 0.9, Math.min(px, py) * 0.5, 0.9], [4, Math.min(px, py) * 0.28, 1]]) {
+    g.save();
+    g.shadowColor = '#fff';
+    g.shadowBlur = blur;
+    g.globalAlpha = alpha;
+    g.lineWidth = width;
+    g.beginPath(); g.roundRect(px, py, w - 2 * px, h - 2 * py, r); g.stroke();
+    g.restore();
+  }
+  g.fillStyle = 'rgba(255,255,255,0.14)';
+  g.beginPath(); g.roundRect(px, py, w - 2 * px, h - 2 * py, r); g.fill();
+  return cnv;
+}
+
 function radialTexture(inner, outer, ring = false) {
   const cnv = document.createElement('canvas');
   cnv.width = cnv.height = 128;
@@ -618,10 +643,28 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
   const shadowTex = texture(radialTexture('rgba(0,0,0,0.55)', 'rgba(0,0,0,0)'));
   const ringTex = texture(radialTexture(null, null, true));
   const cardTex = texture(drawCardBacks());
+  const GLOW_PAD = 0.14; // world units the glow spills past the square
+  const glowEdgeTex = texture(glowTexture(256, 512, [GLOW_PAD / (W + 2 * GLOW_PAD), GLOW_PAD / (C + 2 * GLOW_PAD)]));
+  const glowCornerTex = texture(glowTexture(512, 512, [GLOW_PAD / (C + 2 * GLOW_PAD), GLOW_PAD / (C + 2 * GLOW_PAD)]));
 
   const M = {
     plane: mesh(planeGeo()),
     roof: mesh(roofGeo()),
+    // unit shapes for the player pieces (see pieces.js)
+    sphere: mesh(latheGeo(Array.from({ length: 13 }, (_, i) => {
+      const a = -Math.PI / 2 + (i / 12) * Math.PI;
+      return [0.5 * Math.cos(a), 0.5 * Math.sin(a)];
+    }), 20)),
+    half: mesh(latheGeo(Array.from({ length: 8 }, (_, i) => {
+      const a = (i / 7) * (Math.PI / 2);
+      return [0.5 * Math.cos(a), Math.sin(a)];
+    }).concat([[0, 1]]).reverse().concat([[0, 0]]).reverse(), 20)),
+    cyl: mesh(latheGeo([[0, 0], [0.5, 0], [0.5, 0], [0.5, 1], [0.5, 1], [0, 1]], 20)),
+    cone: mesh(latheGeo([[0, 0], [0.5, 0], [0.5, 0], [0, 1]], 20)),
+    torus: mesh(latheGeo(Array.from({ length: 13 }, (_, i) => {
+      const a = (i / 12) * Math.PI * 2;
+      return [0.35 + 0.15 * Math.cos(a), 0.15 * Math.sin(a)];
+    }), 24)),
     slab: mesh(boxGeo(L, 0.3, L)),
     box: mesh(boxGeo(1, 1, 1)),
     pawn: mesh(latheGeo(pawnProfile(), 28)),
@@ -665,6 +708,16 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
   let selected = null;
   let animating = false;
   const cam = { theta: 0, phi: 0.95, r: 16, auto: true };
+  // Follow camera: rides behind the player whose turn it is.
+  const follow = { on: false, id: null, focus: 'token', yaw: 0, tilt: 0, zoom: 1 };
+  let lastNow = 0;
+  // Squares the moving piece is about to cross: { id, cells, passed, color, alpha }
+  let path = null;
+  const badge = document.createElement('div');
+  badge.className = 'step-badge';
+  badge.hidden = true;
+  badge.setAttribute('aria-live', 'polite');
+  canvas.parentElement?.append(badge);
   let dirty = true;
   const tweens = new Set();
 
@@ -691,6 +744,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
     return { eye, view, proj: perspective(fov, aspect, 0.5, 200), fov, aspect };
   }
   api.resetView = () => {
+    if (follow.on) { follow.yaw = 0; follow.tilt = 0; follow.zoom = 1; dirty = true; return; }
     cam.theta = 0; cam.phi = 0.95; cam.r = fitRadius(); cam.auto = true; cam.target = null; dirty = true;
   };
 
@@ -723,6 +777,29 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
   };
   const dropIn = (t) => ({ s: 0.55 + 0.45 * Math.min(1, t * 1.6), dy: (1 - easeOutBounce(t)) * 1.3 });
   const fadeOut = (t) => ({ s: Math.max(0, 1 - t), dy: t * 0.35 });
+
+  const pieceColors = new Map();
+  function drawPiece(id, t) {
+    const piece = pieceFor(id);
+    const base = trs([t.x, t.lift, t.z], quat.axis([0, 1, 0], t.yaw ?? 0), 1.15);
+    const dark = t.color.map((c) => c * 0.62);
+    for (const [shape, at, sc, col, rot] of piece.parts) {
+      let c;
+      if (col === 'P') c = t.color;
+      else if (col === 'D') c = dark;
+      else {
+        c = pieceColors.get(col);
+        if (!c) { c = hexToRgb(col); pieceColors.set(col, c); }
+      }
+      const q = rot ? quat.axis([rot[0], rot[1], rot[2]], rot[3]) : undefined;
+      draw(M[shape], mul4(base, trs(at, q, sc)), c, null, { spec: 0.45 });
+    }
+  }
+
+  /** Direction a piece faces on each side of the board (yaw that turns +z that way). */
+  const SIDE_YAW = [-Math.PI / 2, Math.PI, Math.PI / 2, 0];
+  const SIDE_DIR = [[-1, 0], [0, -1], [1, 0], [0, 1]];
+  const sideOf = (pos) => Math.floor(((pos % 40) + 40) % 40 / 10);
 
   function buildingList() {
     const out = [];
@@ -796,7 +873,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
     const current = state && !state.winner ? state.players[state.current]?.id : null;
     for (const [id, t] of tokens) {
       if (!t.visible) continue;
-      draw(M.pawn, trs([t.x, t.lift, t.z], undefined, 1.05), t.color, null, { spec: 0.6 });
+      drawPiece(id, t);
     }
     for (const d of dice) draw(M.die, trs(d.p, d.q), [1, 1, 1], diceTex, { spec: 0.35 });
     for (const deck of ['fortune', 'community']) {
@@ -832,6 +909,24 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
       const pl = PILE[deck];
       draw(M.plane, trs([pl.at[0] + 0.05, 0.002, pl.at[1] + 0.05], quat.axis([0, 1, 0], pl.yaw), [CARD_W * 1.25, 1, CARD_D * 1.35]), [1, 1, 1, 0.45], shadowTex, { lit: false });
     }
+    if (path && path.alpha > 0) {
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // additive: glows brighten the board
+      const pulse = 0.8 + 0.2 * Math.sin(lastNow / 160);
+      const tint = path.color.map((c) => Math.min(1, c * 0.75 + 0.35));
+      path.cells.forEach((pos, i) => {
+        if (i < path.passed) return;
+        const last = i === path.cells.length - 1;
+        const k = sideOf(pos), corner = pos % 10 === 0;
+        const [x0, y0, x1, y1] = frameRect(pos % 10);
+        const [cx, cz] = frameToWorld(k, (x0 + x1) / 2, (y0 + y1) / 2);
+        const fw = x1 - x0 + 2 * GLOW_PAD, fd = y1 - y0 + 2 * GLOW_PAD;
+        const q = quat.axis([0, 1, 0], (-k * Math.PI) / 2);
+        const a = path.alpha * (last ? pulse : 0.6);
+        draw(M.plane, trs([cx, 0.006, cz], q, [fw, 1, fd]), [...tint, a], corner ? glowCornerTex : glowEdgeTex, { lit: false });
+        if (last) draw(M.plane, trs([cx, 0.006, cz], q, [fw, 1, fd]), [...tint, a * 0.6], corner ? glowCornerTex : glowEdgeTex, { lit: false });
+      });
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    }
     if (selected !== null) {
       const k = Math.floor(selected / 10);
       const [x0, y0, x1, y1] = frameRect(selected % 10);
@@ -840,11 +935,70 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
       draw(M.plane, trs([cx, 0.005, cz], undefined, sz), [1, 0.85, 0.2, 0.35], null, { lit: false });
     }
     gl.depthMask(true);
+    placeBadge();
   }
+
+  function placeBadge() {
+    if (badge.hidden || !path) return;
+    const p = api.screenPos(path.id, 0.72);
+    if (!p) return;
+    badge.style.left = `${p.x}px`;
+    badge.style.top = `${p.y}px`;
+  }
+
+  // ----- follow camera
+  const lerpAngle = (a, b, k) => {
+    let d = ((b - a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+    return a + d * k;
+  };
+  function updateFollow(dt) {
+    const id = follow.id ?? (state && !state.winner ? state.players[state.current]?.id : null);
+    const t = id && tokens.get(id);
+    if (!t || !t.visible) return false;
+    const k = t.inJail ? 1 : sideOf(t.pos);
+    const d = SIDE_DIR[k];
+    let target, r, phi;
+    if (follow.focus === 'dice') {
+      target = [t.x * 0.35, 0, t.z * 0.35];
+      r = 9.5 * follow.zoom;
+      phi = 0.85 + follow.tilt;
+    } else {
+      // a little ahead of the piece and nudged towards the middle of the board
+      target = [t.x + d[0] * 1.9 - t.x * 0.08, 0, t.z + d[1] * 1.9 - t.z * 0.08];
+      r = 6.4 * follow.zoom;
+      phi = 0.8 + follow.tilt;
+    }
+    // look along the direction of travel: the camera sits behind the piece
+    const theta = Math.atan2(-d[0], -d[1]) + follow.yaw;
+    const a = 1 - Math.exp(-dt * 3.2);
+    const cur = cam.target ?? [0, 0, 0.35];
+    const next = cur.map((v, i) => lerp(v, target[i], a));
+    const before = [cam.theta, cam.phi, cam.r, ...cur];
+    cam.target = next;
+    cam.theta = lerpAngle(cam.theta, theta, a);
+    cam.phi = lerp(cam.phi, Math.min(Math.max(phi, 0.25), 1.4), a);
+    cam.r = lerp(cam.r, r, a);
+    const after = [cam.theta, cam.phi, cam.r, ...next];
+    return after.some((v, i) => Math.abs(v - before[i]) > 1e-4);
+  }
+
+  /** 'overview' (whole board) or 'follow' (third-person camera behind the active piece). */
+  api.setMode = (mode) => {
+    follow.on = mode === 'follow';
+    follow.yaw = 0; follow.tilt = 0; follow.zoom = 1;
+    if (!follow.on) api.resetView();
+    cam.auto = !follow.on;
+    dirty = true;
+  };
+  api.mode = () => (follow.on ? 'follow' : 'overview');
 
   let rafId = 0;
   function frame(now) {
     rafId = requestAnimationFrame(frame);
+    const dt = Math.min(0.1, (now - (lastNow || now)) / 1000);
+    lastNow = now;
+    if (follow.on && updateFollow(dt)) dirty = true;
+    if (path && path.alpha > 0) dirty = true; // keep the destination pulsing
     for (const tw of [...tweens]) {
       const t = Math.min(1, (now - tw.start) / tw.dur);
       tw.fn(t);
@@ -874,7 +1028,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
     dragDist = 0;
     if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
-      pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), r: cam.r };
+      pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), r: cam.r, z: follow.zoom };
     }
   });
   canvas.addEventListener('pointermove', (e) => {
@@ -886,11 +1040,16 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
     if (pointers.size === 2 && pinch) {
       const [a, b] = [...pointers.values()];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
-      cam.r = Math.min(Math.max(pinch.r * (pinch.d / Math.max(d, 1)), 6), 40);
-      cam.auto = false;
+      if (follow.on) follow.zoom = Math.min(Math.max(pinch.z * (pinch.d / Math.max(d, 1)), 0.5), 3);
+      else { cam.r = Math.min(Math.max(pinch.r * (pinch.d / Math.max(d, 1)), 6), 40); cam.auto = false; }
     } else if (pointers.size === 1) {
-      cam.theta -= dx * 0.008;
-      if (e.pointerType === 'mouse') cam.phi = Math.min(Math.max(cam.phi + dy * 0.006, 0.35), 1.5);
+      if (follow.on) {
+        follow.yaw -= dx * 0.008;
+        if (e.pointerType === 'mouse') follow.tilt = Math.min(Math.max(follow.tilt + dy * 0.006, -0.25), 0.9);
+      } else {
+        cam.theta -= dx * 0.008;
+        if (e.pointerType === 'mouse') cam.phi = Math.min(Math.max(cam.phi + dy * 0.006, 0.35), 1.5);
+      }
     }
     dirty = true;
   });
@@ -904,8 +1063,8 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
   canvas.addEventListener('pointercancel', up);
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
-    cam.r = Math.min(Math.max(cam.r * Math.exp(e.deltaY * 0.0012), 6), 40);
-    cam.auto = false;
+    if (follow.on) follow.zoom = Math.min(Math.max(follow.zoom * Math.exp(e.deltaY * 0.0012), 0.5), 3);
+    else { cam.r = Math.min(Math.max(cam.r * Math.exp(e.deltaY * 0.0012), 6), 40); cam.auto = false; }
     dirty = true;
   }, { passive: false });
 
@@ -955,7 +1114,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
     }
     next.players.forEach((p, j) => {
       let t = tokens.get(p.id);
-      if (!t) { t = { pos: p.pos, inJail: p.inJail, slot: j }; tokens.set(p.id, t); }
+      if (!t) { t = { pos: p.pos, inJail: p.inJail, slot: j, yaw: SIDE_YAW[sideOf(p.pos)] }; tokens.set(p.id, t); }
       t.color = hexToRgb(colorOf(p.id));
       t.slot = j;
       t.visible = !p.bankrupt;
@@ -967,10 +1126,22 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
   async function hop(t, toPos, toJail, seconds, height) {
     const [ax, az] = [t.x, t.z];
     const [bx, bz] = slotWorld(toPos, t.slot, toJail);
+    if (Math.hypot(bx - ax, bz - az) > 0.05) {
+      const want = Math.atan2(bx - ax, bz - az);
+      const from = t.yaw ?? want;
+      const turn = t.yaw;
+      t.yaw = turn === undefined ? want : from;
+      const yaw0 = t.yaw;
+      const fn = (k) => { t.yaw = lerpAngle(yaw0, want, Math.min(1, k * 2.5)); };
+      t._turn = fn;
+    }
+    const turnFn = t._turn;
+    t._turn = null;
     await tween(seconds, (k) => {
       const e = easeInOut(k);
       t.x = lerp(ax, bx, e); t.z = lerp(az, bz, e);
       t.lift = height * Math.sin(Math.PI * k);
+      turnFn?.(k);
     });
     t.pos = toPos; t.inJail = toJail; t.lift = 0;
   }
@@ -1052,19 +1223,35 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
       for (const ev of events) {
         const t = tokens.get(ev.player);
         if (ev.type === 'roll') {
+          if (follow.on) { follow.id = ev.player; follow.focus = 'dice'; }
           await rollDice(ev.dice, speed);
           await tween(0.15 / speed, () => {});
+          follow.focus = 'token';
         } else if (ev.type === 'move' && t) {
           const n = Math.abs(ev.steps);
           const dir = Math.sign(ev.steps) || 1;
           const per = (n > 12 ? 0.075 : 0.17) / speed;
           let pos = ev.from;
           if (t.pos !== ev.from || t.inJail) { t.pos = ev.from; t.inJail = false; placeToken(ev.player, t); }
+          if (follow.on) { follow.id = ev.player; follow.focus = 'token'; }
+          // light up every square of the move, then walk it
+          const cells = [];
+          for (let s = 0, q = pos; s < n; s++) { q = (q + dir + 40) % 40; cells.push(q); }
+          path = { id: ev.player, cells, passed: 0, color: t.color, alpha: 0 };
+          showBadge(n, t.color);
+          await tween((n > 12 ? 0.25 : 0.45) / speed, (k) => { path.alpha = k; });
           for (let s = 0; s < n; s++) {
             pos = (pos + dir + 40) % 40;
             await hop(t, pos, false, per, 0.42);
+            path.passed = s; // the square it's standing on keeps glowing until it lands
+            showBadge(n - s - 1, t.color);
           }
+          path.passed = n - 1;
+          badge.hidden = true;
+          await tween(0.6 / speed, (k) => { path.alpha = 1 - k; });
+          path = null;
         } else if (ev.type === 'go_to_jail' && t) {
+          if (follow.on) follow.id = ev.player;
           await hop(t, 10, true, 0.75 / speed, 2.2);
         } else if (ev.type === 'jail_release' && t) {
           await hop(t, 10, false, 0.3 / speed, 0.5);
@@ -1083,8 +1270,22 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
       }
     } finally {
       animating = false;
+      path = null;
+      badge.hidden = true;
+      follow.id = null;
+      follow.focus = 'token';
+      dirty = true;
     }
   };
+
+  function showBadge(n, color) {
+    if (n <= 0) { badge.hidden = true; return; }
+    badge.textContent = String(n);
+    badge.style.setProperty('--c', `rgb(${color.map((c) => Math.round(c * 255)).join(',')})`);
+    badge.title = `${n} step${n === 1 ? '' : 's'} to go`;
+    badge.hidden = false;
+    placeBadge();
+  }
 
   /** Where a player's token is on screen (CSS px inside the canvas), or null. */
   api.screenPos = (id, height = 0.95) => {

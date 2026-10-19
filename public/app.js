@@ -6,6 +6,7 @@ import { deedCard } from './deeds.js';
 import { createBoard3D } from './board3d.js';
 import { createTradeUI } from './trade.js';
 import { createMoneyUI } from './money.js';
+import { pieceFor } from './pieces.js';
 
 const $ = (id) => document.getElementById(id);
 const API = ''; // same origin; set to the server URL if the page is hosted elsewhere
@@ -381,6 +382,9 @@ function render() {
   $('toggle-view').hidden = !board3d;
   $('toggle-view').textContent = use3d ? '2D view' : '3D view';
   $('reset-view').hidden = !use3d;
+  $('cam-mode').hidden = !use3d;
+  $('cam-mode').textContent = board3d?.mode() === 'follow' ? 'Overview' : 'Follow';
+  $('cam-mode').setAttribute('aria-pressed', String(board3d?.mode() === 'follow'));
   if (use3d) board3d.sync(game.state);
   else renderBoard();
   renderSide();
@@ -398,6 +402,7 @@ function renderLobby() {
   const isHost = lobby.hostId === session.id;
   $('members').replaceChildren(...lobby.members.map((m) => el('li', {},
     el('span', { class: 'dot', style: `background:${colorOf(m.id)}` }),
+    el('span', { class: 'piece', title: pieceFor(m.id).name }, pieceFor(m.id).emoji),
     el('span', { class: 'grow' }, m.name, m.id === session.id ? ' (you)' : ''),
     el('span', { class: 'tag' }, m.bot ? 'bot' : m.id === lobby.hostId ? 'host' : m.connected ? '' : 'offline'),
     isHost && m.id !== session.id ? el('button', { class: 'small', onclick: () => host('kick', m.id) }, 'Remove') : null,
@@ -507,6 +512,7 @@ function renderSide() {
     const offline = m && !m.bot && !m.connected && !m.autoplay;
     return el('li', { class: `${pl.id === cur().id ? 'turn' : ''}${pl.bankrupt ? ' out' : ''}`, 'data-flash': '' },
       el('span', { class: 'dot', style: `background:${colorOf(pl.id)}` }),
+      el('span', { class: 'piece', title: pieceFor(pl.id).name }, pieceFor(pl.id).emoji),
       el('span', { class: 'grow' }, pl.name, pl.id === session.id ? ' (you)' : '', pl.inJail ? ' 🔒' : ''),
       el('span', { class: 'tag' }, m?.bot ? 'bot' : m?.autoplay ? 'auto' : offline ? 'offline' : ''),
       isHost && offline && !pl.bankrupt ? el('button', { class: 'small', onclick: () => host('takeover', pl.id) }, 'Bot plays') : null,
@@ -598,6 +604,14 @@ $('join').onclick = () => homeAction((name) => {
 $('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('join').click(); });
 $('toggle-view').onclick = () => setView(!use3d);
 $('reset-view').onclick = () => board3d?.resetView();
+$('cam-mode').onclick = () => {
+  if (!board3d) return;
+  const next = board3d.mode() === 'follow' ? 'overview' : 'follow';
+  board3d.setMode(next);
+  try { localStorage.setItem('estate-cam', next); } catch { /* ignore */ }
+  render();
+};
+try { if (board3d && localStorage.getItem('estate-cam') === 'follow') board3d.setMode('follow'); } catch { /* ignore */ }
 try { if (localStorage.getItem('estate-view') === '2d') use3d = false; } catch { /* ignore */ }
 $('board3d').hidden = !use3d;
 $('board').hidden = use3d;

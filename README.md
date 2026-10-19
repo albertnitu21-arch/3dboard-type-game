@@ -16,6 +16,13 @@ roll and tokens hop square by square; your buttons appear once the move has
 played out. A **2D view** button switches to a flat board (also used
 automatically on devices without WebGL).
 
+**Pieces and camera:** each player gets one of eight pieces (rubber duck, rocket,
+snowman, mushroom, robot, ice cream, cactus, UFO) in their colour; they're defined
+in `public/pieces.js`. The **Follow** button switches to a third-person camera
+that rides behind whoever's turn it is; **Overview** goes back to the whole
+board. When a piece moves, the squares it will cross glow in its colour (the
+landing square pulses) and a counter above it shows the steps left.
+
 **Trading:** anyone can press **Trade…** between moves (not only on their turn).
 The trade window shows both players' properties as title-deed cards; click
 cards and add cash, and the offer updates live with a rough value balance and a

@@ -328,3 +328,20 @@ button.deed:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.5
   100% { opacity: 0; translate: 0 -60px; }
 }
 @media (prefers-reduced-motion: reduce) { .money-float, .money-float.big { animation-duration: 1.2s; } }
+
+/* player pieces + step counter */
+.piece { font-size: 17px; line-height: 1; width: 22px; text-align: center; flex: none; }
+.step-badge {
+  --c: #1f6f5c;
+  position: absolute; z-index: 5; pointer-events: none; transform: translate(-50%, -100%);
+  min-width: 34px; height: 34px; padding: 0 8px; border-radius: 999px;
+  display: flex; align-items: center; justify-content: center;
+  background: #fffdf6; color: #1f221c; font-weight: 900; font-size: 18px; font-variant-numeric: tabular-nums;
+  border: 3px solid var(--c); box-shadow: 0 0 0 3px rgba(255,255,255,0.6), 0 0 18px var(--c), 0 4px 10px rgba(0,0,0,0.25);
+  animation: badge-pop 0.25s ease-out;
+}
+.step-badge[hidden] { display: none; }
+@keyframes badge-pop { from { scale: 0.6; } to { scale: 1; } }
+.board-tools button[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+.log:empty { display: none; }
