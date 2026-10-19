@@ -43,9 +43,13 @@ function cleanName(raw, fallback) {
 }
 
 export class Room {
-  constructor(code, { botDelay = 1500 } = {}) {
+  constructor(code, { botDelay = 1500, tradeTimeout = 60_000 } = {}) {
     this.code = code;
     this.botDelay = botDelay;
+    this.tradeTimeout = tradeTimeout;
+    this.tradeTimer = null;
+    this.tradeKey = null;
+    this.tradeDeadline = null;
     this.members = [];
     this.nextId = 1;
     this.hostId = null;
@@ -138,6 +142,7 @@ export class Room {
       state: publicState(this.state),
       legal: getLegalActions(this.state, m.id),
       events,
+      tradeMsLeft: this.tradeDeadline ? Math.max(0, this.tradeDeadline - Date.now()) : null,
     });
   }
 
@@ -241,8 +246,30 @@ export class Room {
     const { state, events } = applyAction(this.state, { ...action, player: id });
     this.state = state;
     this.touched = Date.now();
+    this._watchTrade();
     this.broadcastState(events);
     this.scheduleBot();
+  }
+
+  /** An unanswered trade offer blocks the game, so it expires after `tradeTimeout`. */
+  _watchTrade() {
+    const t = this.state?.trade;
+    const key = t ? JSON.stringify(t) : null;
+    if (key === this.tradeKey) return;
+    clearTimeout(this.tradeTimer);
+    this.tradeKey = key;
+    this.tradeDeadline = null;
+    if (!t) return;
+    this.tradeDeadline = Date.now() + this.tradeTimeout;
+    this.tradeTimer = setTimeout(() => {
+      if (this.disposed || this.tradeKey !== key || !this.state?.trade) return;
+      try {
+        this.act(t.to, { type: 'decline_trade' });
+      } catch (err) {
+        console.error(`[room ${this.code}] trade expiry failed: ${err.message}`);
+      }
+    }, this.tradeTimeout);
+    this.tradeTimer.unref?.();
   }
 
   scheduleBot() {
@@ -276,6 +303,7 @@ export class Room {
   dispose() {
     this.disposed = true;
     clearTimeout(this.botTimer);
+    clearTimeout(this.tradeTimer);
     for (const m of this.members) {
       m.stream?.close();
       m.stream = null;
@@ -284,8 +312,9 @@ export class Room {
 }
 
 export class Lobby {
-  constructor({ botDelay = 1500, maxRooms = 200, idleMs = 6 * 60 * 60 * 1000 } = {}) {
+  constructor({ botDelay = 1500, tradeTimeout = 60_000, maxRooms = 200, idleMs = 6 * 60 * 60 * 1000 } = {}) {
     this.botDelay = botDelay;
+    this.tradeTimeout = tradeTimeout;
     this.maxRooms = maxRooms;
     this.idleMs = idleMs;
     this.rooms = new Map();
@@ -299,7 +328,7 @@ export class Lobby {
     do {
       code = Array.from({ length: 4 }, () => CODE_CHARS[randomInt(CODE_CHARS.length)]).join('');
     } while (this.rooms.has(code));
-    const room = new Room(code, { botDelay: this.botDelay });
+    const room = new Room(code, { botDelay: this.botDelay, tradeTimeout: this.tradeTimeout });
     const member = room.join(hostName);
     this.rooms.set(code, room);
     return { room, member };

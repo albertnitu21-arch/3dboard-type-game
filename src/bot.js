@@ -20,6 +20,36 @@ function findMonopolyTrade(state, p) {
   return null;
 }
 
+/**
+ * Would this bot accept the pending trade? It values properties at their price
+ * (mortgage value if mortgaged), wants a premium for anything that completes the
+ * other player's colour set, and a premium to break up a set of its own.
+ */
+export function wouldAccept(state, botId) {
+  const t = state.trade;
+  if (!t || t.to !== botId) return false;
+  const worth = (pos) => (state.props[pos].mortgaged ? BOARD[pos].mortgage : BOARD[pos].price);
+  const completesSet = (playerId, gained) => Object.values(GROUP_POSITIONS).some((g) => {
+    if (!g.some((q) => gained.includes(q))) return false;
+    return g.every((q) => state.props[q].owner === playerId || gained.includes(q));
+  });
+  const ownsSetOf = (pos) => {
+    const g = BOARD[pos].group && GROUP_POSITIONS[BOARD[pos].group];
+    return !!g && g.every((q) => state.props[q].owner === botId);
+  };
+  const jailValue = 50;
+  // From the bot's side: it receives t.give and hands over t.get.
+  const gets = t.give.cash + t.give.props.reduce((s, q) => s + worth(q), 0) + t.give.jailCards * jailValue;
+  let gives = t.get.cash + t.get.jailCards * jailValue;
+  for (const q of t.get.props) gives += worth(q) * (ownsSetOf(q) ? 2.5 : 1);
+  if (completesSet(t.from, t.get.props)) gives *= 1.8;
+  if (completesSet(botId, t.give.props)) gives *= 0.7;
+  if (gives === 0) return gets > 0;
+  const bot = state.players.find((p) => p.id === botId);
+  if (bot.cash - t.get.cash < 50 && t.get.cash > 0) return false;
+  return gets >= gives * 1.15;
+}
+
 export function chooseAction(state, playerId, rand = Math.random) {
   const legal = getLegalActions(state, playerId);
   if (!legal.length) return null;
@@ -73,12 +103,9 @@ export function chooseAction(state, playerId, rand = Math.random) {
       return mk(has('end_turn'));
     }
     case 'trade': {
-      const t = state.trade;
       const accept = has('accept_trade');
       if (!accept) return mk(has('cancel_trade'));
-      const value = (o) => o.cash + o.props.reduce((sum, q) => sum + BOARD[q].price, 0);
-      // Sell for at least double the asking value; otherwise say no.
-      return mk(value(t.give) >= 2 * value(t.get) && value(t.get) > 0 ? accept : has('decline_trade'));
+      return mk(wouldAccept(state, playerId) ? accept : has('decline_trade'));
     }
     default:
       return null;

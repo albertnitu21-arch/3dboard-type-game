@@ -1,8 +1,9 @@
-// Minimal web client: lobby + a flat 2D board. A stand-in until the 3D board exists;
-// the 3D client can reuse everything here except render().
+// Web client: lobby, side panel, animation queue and the 2D fallback board.
+// The 3D board lives in board3d.js and the trade window in trade.js.
 
 import { BOARD, GROUPS, STATION_RENTS } from '/engine/board.js';
 import { createBoard3D } from './board3d.js';
+import { createTradeUI } from './trade.js';
 
 const $ = (id) => document.getElementById(id);
 const API = ''; // same origin; set to the server URL if the page is hosted elsewhere
@@ -42,7 +43,7 @@ const roomApi = (verb, body) => api(`/api/rooms/${session.code}/${verb}`, { toke
 async function act(action) {
   $('game-error').textContent = '';
   // Lock the buttons until the result has been animated, so nothing is sent twice.
-  const buttons = document.querySelectorAll('#actions button, #mine button, #trade-form button');
+  const buttons = document.querySelectorAll('#actions button, #mine button');
   buttons.forEach((b) => { b.disabled = true; });
   try {
     await roomApi('action', { action });
@@ -82,6 +83,8 @@ function leaveRoom(message = '') {
   game = null;
   queue.length = 0;
   selectedSpace = null;
+  tradeUI.close();
+  closeCard?.();
   logLines.length = 0;
   store.clear();
   history.replaceState(null, '', location.pathname);
@@ -136,7 +139,61 @@ try {
   console.warn('3D board unavailable:', err);
 }
 if (!board3d) use3d = false;
-if (board3d) board3d.onSpace = (pos) => showSpace(pos);
+if (board3d) {
+  board3d.onSpace = (pos) => showSpace(pos);
+  board3d.onCard = (ev, speed) => showCardPopup(ev, speed);
+}
+
+const tradeUI = createTradeUI({
+  root: $('trade-modal'),
+  banner: $('trade-banner'),
+  getGame: () => game,
+  myId: () => session?.id,
+  nameOf: (id) => nameOf(id),
+  colorOf: (id) => colorOf(id),
+  send: (action) => roomApi('action', { action }),
+});
+
+// --------------------------------------------------------- card pop-up
+
+const DECK_STYLE = {
+  fortune: { title: 'Fortune', icon: '?', cls: 'fortune' },
+  community: { title: 'Community Fund', icon: '◆', cls: 'community' },
+};
+let closeCard = null;
+/** Show a drawn card to everyone. Resolves when it closes (tap, OK, or timeout). */
+function showCardPopup(ev, speed = 1) {
+  if (document.hidden) return Promise.resolve();
+  closeCard?.();
+  const box = $('card-popup');
+  const d = DECK_STYLE[ev.deck] ?? DECK_STYLE.fortune;
+  const mine = ev.player === session?.id;
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(t);
+      box.hidden = true;
+      box.replaceChildren();
+      closeCard = null;
+      resolve();
+    };
+    closeCard = finish;
+    const ok = el('button', { type: 'button', class: 'primary', onclick: finish }, 'OK');
+    box.replaceChildren(el('div', { class: `drawn-card ${d.cls}`, role: 'dialog', 'aria-live': 'polite', 'aria-label': `${d.title} card` },
+      el('div', { class: 'dc-head' }, el('span', { class: 'dc-icon' }, d.icon), el('span', {}, d.title.toUpperCase())),
+      el('div', { class: 'dc-who' },
+        el('span', { class: 'dot', style: `background:${colorOf(ev.player)}` }),
+        mine ? 'You drew' : `${nameOf(ev.player)} drew`),
+      el('p', { class: 'dc-text' }, ev.text),
+      ok));
+    box.hidden = false;
+    box.onclick = (e) => { if (e.target === box) finish(); };
+    const t = setTimeout(finish, (mine ? 4500 : 3500) / speed);
+    ok.focus({ preventScroll: true });
+  });
+}
 
 // State updates are animated one at a time. The side panel (and your buttons)
 // update once the dice have landed and the tokens have moved.
@@ -154,7 +211,11 @@ async function drain() {
     if (use3d && board3d && game) {
       try { await board3d.play(d.events, d.state, speed); } catch (err) { console.error(err); }
     }
-    game = { state: d.state, legal: d.legal };
+    if (!(use3d && board3d)) {
+      // The 3D board shows drawn cards itself; the flat board needs the pop-up here.
+      for (const ev of d.events) if (ev.type === 'card' && game) await showCardPopup(ev, speed);
+    }
+    game = { state: d.state, legal: d.legal, tradeMsLeft: d.tradeMsLeft ?? null, receivedAt: Date.now() };
     for (const ev of d.events) {
       const line = describe(ev);
       if (line) logLines.push({ text: line });
@@ -274,6 +335,7 @@ function render() {
   renderSide();
   renderSpaceInfo();
   renderLog();
+  tradeUI.update();
 }
 
 function renderLobby() {
@@ -355,17 +417,11 @@ function statusText() {
   const mine = (id) => (id === session.id ? 'You' : nameOf(id));
   switch (s.phase) {
     case 'auction': return `Auction: ${sp(s.auction.pos)}. High bid ${s.auction.highBid}${s.auction.highBidder ? ` (${nameOf(s.auction.highBidder)})` : ''}. ${mine(s.auction.order[s.auction.idx])} to bid.`;
-    case 'trade': return `${nameOf(s.trade.from)} offers ${nameOf(s.trade.to)} a trade.`;
+    case 'trade': return `${nameOf(s.trade.from)} is offering ${nameOf(s.trade.to)} a trade…`;
     case 'debt': return `${mine(cur().id)} owe${cur().id === session.id ? '' : 's'} ${s.debt.total}. Raise cash or go bankrupt.`;
     case 'buy': return `${mine(cur().id)} landed on ${sp(s.buy.pos)} (${BOARD[s.buy.pos].price}).`;
     default: return cur().id === session.id ? 'Your turn.' : `${nameOf(cur().id)}'s turn.`;
   }
-}
-
-function tradeSummary(t) {
-  const side = (o) => [o.cash ? `${o.cash} cash` : null, ...o.props.map(sp), o.jailCards ? `${o.jailCards} jail card(s)` : null]
-    .filter(Boolean).join(', ') || 'nothing';
-  return `${nameOf(t.from)} gives ${side(t.give)} for ${side(t.get)}.`;
 }
 
 function renderSide() {
@@ -375,9 +431,8 @@ function renderSide() {
   const LABEL = {
     roll: 'Roll dice', pay_jail_fine: `Pay fine (${state.rules.jailFine})`, use_jail_card: 'Use jail card',
     buy: 'Buy', decline: 'Auction it', pass: 'Pass', end_turn: 'End turn', pay_debt: 'Pay debt',
-    declare_bankruptcy: 'Declare bankruptcy', accept_trade: 'Accept', decline_trade: 'Decline', cancel_trade: 'Cancel trade',
+    declare_bankruptcy: 'Declare bankruptcy',
   };
-  if (state.phase === 'trade') buttons.push(el('div', {}, tradeSummary(state.trade)));
   for (const a of legal) {
     if (a.type === 'bid') {
       const input = el('input', { type: 'number', min: a.min, max: a.max, value: a.min, 'aria-label': 'Bid amount' });
@@ -386,7 +441,7 @@ function renderSide() {
     } else if (LABEL[a.type]) {
       const danger = a.type === 'declare_bankruptcy';
       buttons.push(el('button', {
-        class: ['roll', 'buy', 'end_turn', 'pay_debt', 'accept_trade'].includes(a.type) ? 'primary' : '',
+        class: ['roll', 'buy', 'end_turn', 'pay_debt'].includes(a.type) ? 'primary' : '',
         onclick: () => (!danger || confirm('Give up and go bankrupt?')) && act({ type: a.type }),
       }, LABEL[a.type]));
     }
@@ -408,7 +463,6 @@ function renderSide() {
   }));
 
   renderMine();
-  renderTradeForm();
 }
 
 function renderMine() {
@@ -424,45 +478,6 @@ function renderMine() {
       b('build', 'Build'), b('sell_building', 'Sell'), b('mortgage', 'Mortgage'), b('unmortgage', 'Pay off'));
   });
   $('mine').replaceChildren(...(rows.length ? rows : [el('div', { class: 'tag' }, 'Nothing yet.')]));
-}
-
-function renderTradeForm() {
-  const { state, legal } = game;
-  const box = $('trade-box');
-  const allowed = legal.some((a) => a.type === 'propose_trade');
-  box.hidden = !allowed;
-  if (!allowed) return;
-  const form = $('trade-form');
-  const prev = form.querySelector('select')?.value;
-  const others = state.players.filter((p) => !p.bankrupt && p.id !== session.id);
-  const tradable = (id) => Object.keys(state.props).map(Number).filter((pos) => {
-    if (state.props[pos].owner !== id) return false;
-    const g = BOARD[pos].group;
-    return !g || Object.keys(state.props).every((q) => BOARD[q].group !== g || state.props[q].houses === 0);
-  });
-  const partner = others.find((p) => p.id === prev) ?? others[0];
-  if (!partner) return form.replaceChildren();
-  const select = el('select', { 'aria-label': 'Trade partner', onchange: renderTradeForm },
-    others.map((p) => el('option', { value: p.id, selected: p.id === partner.id }, p.name)));
-  const side = (title, who, key) => el('fieldset', {}, el('legend', {}, title),
-    el('label', {}, 'Cash', el('input', { type: 'number', min: 0, max: who.cash, value: 0, name: `${key}-cash` })),
-    tradable(who.id).map((pos) => el('label', {}, el('input', { type: 'checkbox', name: `${key}-prop`, value: pos }), sp(pos))),
-    who.jailCards.length ? el('label', {}, el('input', { type: 'checkbox', name: `${key}-jail` }), 'Jail card') : null);
-  form.replaceChildren(
-    el('label', {}, 'With', select),
-    side('You give', me(), 'give'),
-    side('You get', partner, 'get'),
-    el('button', { class: 'primary' }, 'Send offer'));
-  form.onsubmit = (e) => {
-    e.preventDefault();
-    const fd = new FormData(form);
-    const offer = (key) => ({
-      cash: Number(fd.get(`${key}-cash`)) || 0,
-      props: fd.getAll(`${key}-prop`).map(Number),
-      jailCards: fd.get(`${key}-jail`) ? 1 : 0,
-    });
-    act({ type: 'propose_trade', to: select.value, give: offer('give'), get: offer('get') });
-  };
 }
 
 function renderLog() {

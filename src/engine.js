@@ -705,7 +705,7 @@ const HANDLERS = {
 
   propose_trade(ctx, a) {
     const { s } = ctx;
-    const from = cur(s);
+    const from = byId(s, a.player);
     const to = byId(s, a.to);
     if (!to || to.bankrupt || to.id === from.id) fail('bad_trade', 'Pick another active player.');
     const t = { from: from.id, to: to.id, give: normalizeOffer(a.give), get: normalizeOffer(a.get) };
@@ -821,7 +821,11 @@ export function applyAction(state, action) {
   if (!phases.includes(state.phase)) {
     fail('wrong_phase', `"${action.type}" is not allowed during ${state.phase}.`);
   }
-  if (!expectedActors(state).includes(action.player)) {
+  if (anyoneMayTrade(state, action.type)) {
+    // Between moves, any player still in the game may open a trade.
+    const p = state.players.find((x) => x.id === action.player);
+    if (!p || p.bankrupt) fail('not_your_turn', 'You are not in this game.');
+  } else if (!expectedActors(state).includes(action.player)) {
     fail('not_your_turn', 'It is not your turn to act.');
   }
   if ((action.type === 'accept_trade' || action.type === 'decline_trade') && action.player !== state.trade.to) {
@@ -842,10 +846,18 @@ export function applyAction(state, action) {
   return { state: s, events: ctx.events };
 }
 
+/** Trades may be opened by anyone while the game waits between moves. */
+function anyoneMayTrade(s, type) {
+  return type === 'propose_trade' && (s.phase === 'roll' || s.phase === 'post_roll');
+}
+
 /** Actions `playerId` may take right now (management actions listed per property). */
 export function getLegalActions(s, playerId) {
   if (s.winner) return [];
-  if (!expectedActors(s).includes(playerId)) return [];
+  if (!expectedActors(s).includes(playerId)) {
+    const p = byId(s, playerId);
+    return p && !p.bankrupt && anyoneMayTrade(s, 'propose_trade') ? [{ type: 'propose_trade', free: true }] : [];
+  }
   const p = byId(s, playerId);
   const out = [];
   const add = (a) => out.push(a);

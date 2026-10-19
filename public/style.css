@@ -135,3 +135,128 @@ summary { cursor: pointer; font-weight: 600; }
 .center .title { font-size: clamp(20px, 4vw, 44px); font-weight: 800; letter-spacing: -0.03em; opacity: 0.8; }
 .center .dice { font-size: clamp(28px, 5vw, 56px); line-height: 1; }
 .center .msg { color: var(--muted); max-width: 80%; }
+
+/* ------------------------------------------------------------ overlays */
+.overlay {
+  position: fixed; inset: 0; z-index: 50;
+  background: rgba(15, 18, 16, 0.55); backdrop-filter: blur(2px);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.modal {
+  background: var(--bg); color: var(--ink); width: min(1040px, 100%); max-height: calc(100vh - 32px);
+  border-radius: 14px; border: 1px solid var(--line); box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+  display: flex; flex-direction: column; overflow: hidden; outline: none;
+}
+.modal-hd { display: flex; align-items: center; gap: 8px; padding: 14px 18px 6px; }
+.modal-hd h2 { margin: 0; font-size: 20px; flex: 1; }
+.modal-body { overflow-y: auto; padding: 8px 18px 12px; flex: 1; min-height: 0; }
+.modal-ft { border-top: 1px solid var(--line); padding: 10px 18px 14px; display: flex; flex-direction: column; gap: 8px; background: var(--panel); }
+.ft-actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
+.ft-actions > .tag, .ft-actions > .error { margin-right: auto; }
+.partners { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 0 18px 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; }
+.chip.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); font-weight: 600; }
+
+.tcols { display: grid; grid-template-columns: minmax(0,1fr) 28px minmax(0,1fr); gap: 10px; align-items: start; }
+.swap { align-self: center; text-align: center; font-size: 22px; color: var(--muted); }
+@media (max-width: 760px) {
+  .overlay { padding: 0; align-items: stretch; }
+  .modal { max-height: none; height: 100%; border-radius: 0; border: 0; }
+  .tcols { grid-template-columns: 1fr; }
+  .swap { transform: rotate(90deg); }
+}
+.tcol { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tcol-hd { display: flex; align-items: center; gap: 8px; }
+.tcol-hd h3 { margin: 0; font-size: 15px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tcol h4 { margin: 8px 0 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.tray {
+  min-height: 96px; display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; align-content: flex-start;
+  padding: 10px; border-radius: 10px; background: var(--board); border: 2px dashed var(--line);
+}
+.tray.empty { align-items: center; justify-content: center; color: var(--muted); font-size: 13px; }
+.tcol.give .tray:not(.empty) { border-style: solid; border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); }
+.tcol.get .tray:not(.empty) { border-style: solid; border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
+.collection { display: flex; flex-wrap: wrap; gap: 8px; }
+.cash-ctl { display: flex; flex-direction: column; gap: 4px; }
+.cash-ctl input[type=number] { width: 110px; flex: 0 1 auto; text-align: right; font-weight: 700; }
+.cash-ctl input[type=range] { width: 100%; accent-color: var(--accent); }
+
+/* title-deed cards: always paper-coloured, like the real thing */
+.deed {
+  --paper: #fffcf2; --ink-d: #1f221c;
+  position: relative; width: 100px; min-height: 128px; padding: 4px; border-radius: 7px;
+  background: var(--paper); color: var(--ink-d); border: 1px solid #cdc3a8;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.15), 0 3px 8px rgba(0,0,0,0.08);
+  display: flex; flex-direction: column; gap: 3px; text-align: center; font-size: 10.5px; line-height: 1.2;
+  font-family: inherit; cursor: default; transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+button.deed { cursor: pointer; }
+button.deed:hover:not(:disabled) { transform: translateY(-2px); border-color: #a99f86; }
+button.deed:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.5); }
+.deed.sel { transform: translateY(-3px); box-shadow: 0 0 0 3px var(--accent), 0 6px 14px rgba(0,0,0,0.2); }
+.deed.md { width: 122px; min-height: 172px; font-size: 11px; }
+.deed-head { background: var(--band); color: var(--band-ink); border: 1.5px solid #20231e; border-radius: 4px; padding: 4px 3px 5px; }
+.deed.plain .deed-head { background: #fff; color: #20231e; }
+.deed-head small { display: block; font-size: 7.5px; letter-spacing: 0.1em; opacity: 0.8; }
+.deed-head b { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.02em; }
+.deed.md .deed-head b { font-size: 11.5px; }
+.deed-body { display: flex; flex-direction: column; gap: 1px; padding: 2px 3px; flex: 1; }
+.deed-body .r { display: flex; justify-content: space-between; gap: 4px; }
+.deed-body .r.muted { color: #6d6a5e; border-top: 1px solid #e3dccb; margin-top: 2px; padding-top: 2px; }
+.deed-body .icon { font-size: 22px; line-height: 1.1; }
+.deed-foot { font-size: 9.5px; font-weight: 700; border-top: 1px solid #e3dccb; padding-top: 3px; }
+.deed .stamp {
+  position: absolute; left: 50%; top: 55%; transform: translate(-50%, -50%) rotate(-24deg);
+  border: 2px solid #b3261e; color: #b3261e; font-weight: 900; font-size: 11px; letter-spacing: 0.08em;
+  padding: 1px 5px; border-radius: 3px; background: rgba(255,252,242,0.85); pointer-events: none;
+}
+.deed .check {
+  position: absolute; top: -7px; right: -7px; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--accent); color: var(--accent-ink); font-size: 12px; font-weight: 900;
+  display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+.deed.jail .deed-head { background: #e9a23b; color: #20231e; }
+.bill {
+  display: flex; align-items: center; gap: 6px; height: 54px; padding: 0 14px; border-radius: 6px; align-self: center;
+  background: repeating-linear-gradient(135deg, #cfe8c9 0 6px, #c3e0bc 6px 12px); color: #1d4a2a;
+  border: 2px solid #5c9b63; box-shadow: inset 0 0 0 3px #e6f4e2, 0 2px 6px rgba(0,0,0,0.15); font-size: 18px;
+}
+.bill-c { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #5c9b63; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; background: #e6f4e2; }
+
+.summary { display: flex; flex-direction: column; gap: 6px; }
+.value-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 13px; flex-wrap: wrap; }
+.value-diff { font-weight: 700; font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--board); }
+.value-diff.up { color: var(--accent); }
+.value-diff.down { color: var(--danger); }
+.value-bar { display: flex; height: 8px; border-radius: 999px; overflow: hidden; background: var(--line); gap: 2px; }
+.value-bar .give { background: color-mix(in srgb, var(--danger) 70%, #ffffff); }
+.value-bar .get { background: var(--accent); }
+.hint { font-size: 13px; font-weight: 600; display: flex; gap: 6px; align-items: center; }
+.hint-dot { color: #d9a400; }
+.countdown { position: relative; height: 22px; margin: 0 18px 4px; border-radius: 999px; background: var(--board); overflow: hidden; }
+.cd-bar { position: absolute; inset: 0 auto 0 0; background: color-mix(in srgb, var(--accent) 35%, transparent); transition: width 0.25s linear; }
+.cd-txt { position: relative; font-size: 12px; font-weight: 600; padding-left: 10px; line-height: 22px; }
+.trade-banner { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; font-size: 14px; }
+.trade-banner .grow { flex: 1; min-width: 0; }
+.trade-banner .dot { display: inline-block; vertical-align: middle; }
+
+/* drawn Fortune / Community Fund card */
+.card-overlay { background: rgba(15, 18, 16, 0.35); backdrop-filter: none; }
+.drawn-card {
+  width: min(360px, 100%); background: #fffcf2; color: #1f221c; border-radius: 14px; padding: 0 0 16px;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.4); text-align: center; overflow: hidden; border: 3px solid var(--deck);
+  animation: card-in 0.45s cubic-bezier(.2,.9,.3,1.25);
+}
+.drawn-card.fortune { --deck: #d9822b; }
+.drawn-card.community { --deck: #8a5a2b; }
+.dc-head { background: var(--deck); color: #fff; font-weight: 900; letter-spacing: 0.12em; padding: 12px; display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 15px; }
+.dc-icon { width: 30px; height: 30px; border-radius: 50%; background: rgba(255,255,255,0.25); display: inline-flex; align-items: center; justify-content: center; font-size: 18px; }
+.dc-who { margin-top: 12px; font-size: 13px; color: #6d6a5e; display: flex; gap: 6px; justify-content: center; align-items: center; }
+.dc-text { font-size: 19px; font-weight: 700; line-height: 1.35; margin: 10px 22px 16px; }
+.drawn-card button { min-width: 120px; }
+@keyframes card-in {
+  from { transform: perspective(800px) translateY(60px) rotateX(70deg) scale(0.7); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) { .drawn-card { animation: none; } }
+@media (max-width: 760px) { .value > .tag { display: none; } }

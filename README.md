@@ -16,6 +16,17 @@ roll and tokens hop square by square; your buttons appear once the move has
 played out. A **2D view** button switches to a flat board (also used
 automatically on devices without WebGL).
 
+**Trading:** anyone can press **Trade…** between moves (not only on their turn).
+The trade window shows both players' properties as title-deed cards; click
+cards and add cash, and the offer updates live with a rough value balance and a
+note when a trade would complete a colour set. The other player gets the same
+visual offer with Accept, Decline or Counter-offer. Unanswered offers expire
+after 60 seconds so the game never gets stuck.
+
+**Cards:** Fortune and Community Fund cards sit in two piles in the middle of the
+board. When someone draws one, the top card lifts off the pile and everyone sees
+a pop-up with who drew it and what it says.
+
 Open the page, create a room, and share the link (or the 4-letter code). The
 host can add bots, remove players and start the game. Reloading the page or
 losing signal puts you back in your seat. If someone drops out mid-game, the host
@@ -51,7 +62,8 @@ server/
   rooms.js        rooms, seats, host controls, bots (no networking)
   game-server.js  HTTP API + live updates + static files
 public/     web client
-  app.js      lobby, side panel, animation queue, 2D fallback board
+  app.js      lobby, side panel, animation queue, card pop-up, 2D fallback board
+  trade.js    trade window (title-deed cards, live offer, incoming offers)
   board3d.js  3D board on plain WebGL: board texture, tokens, houses, dice, camera
 test/       engine, simulation and server tests
 ```
@@ -118,7 +130,7 @@ the third try), even building/selling with a limited bank supply, mortgages,
 debt with raise-money-then-pay, bankruptcy to a player or the bank, trading, and a
 winner when one player is left.
 
-**Deliberate simplifications:** managing and trading only on your own turn;
+**Deliberate simplifications:** building and mortgaging only on your own turn (trading is open to everyone between moves);
 mortgaged properties change hands without the 10% fee; bankruptcy to the bank
 returns properties unowned (no auction); "collect from everyone" cards take only
 what each player holds; no Free Parking jackpot.

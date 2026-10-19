@@ -465,6 +465,33 @@ test('trade: invalid offers are rejected', () => {
   throwsCode(() => act(s, 'propose_trade', { to: 'p2', give: { cash: -5 }, get: {} }), 'bad_trade');
 });
 
+test('trade: any player may propose between moves, not mid-move', () => {
+  let s = edit(mk(), (c) => { own(c, 'p2', 1); own(c, 'p3', 3); });
+  // p1 is to roll, but p2 and p3 trade with each other.
+  s = act(s, 'propose_trade', { to: 'p3', give: { props: [1] }, get: { props: [3] } }, 'p2').state;
+  assert.equal(s.phase, 'trade');
+  assert.equal(s.trade.from, 'p2');
+  assert.equal(getActor(s), 'p3');
+  throwsCode(() => act(s, 'roll'), 'wrong_phase');
+  throwsCode(() => act(s, 'cancel_trade', {}, 'p1'), 'not_your_turn');
+  s = act(s, 'accept_trade', {}, 'p3').state;
+  assert.equal(s.props[1].owner, 'p3');
+  assert.equal(s.phase, 'roll');
+  assert.equal(cur(s).id, 'p1');
+
+  // Mid-move (buy / auction / debt) only the active player can act.
+  const buying = roll(mk(), 1, 2).state;
+  throwsCode(() => act(buying, 'propose_trade', { to: 'p1', give: { cash: 10 }, get: {} }, 'p2'), 'wrong_phase');
+  const owing = roll(edit(mk(), (c) => { c.players[0].cash = 10; }), 1, 3).state; // City Tax
+  assert.equal(owing.phase, 'debt');
+  throwsCode(() => act(owing, 'propose_trade', { to: 'p1', give: { cash: 10 }, get: {} }, 'p2'), 'not_your_turn');
+  assert.deepEqual(getLegalActions(buying, 'p2'), []);
+  // Bankrupt players cannot trade.
+  const out = edit(mk(), (c) => { c.players[2].bankrupt = true; c.players[2].cash = 0; });
+  throwsCode(() => act(out, 'propose_trade', { to: 'p1', give: {}, get: { cash: 1 } }, 'p3'), 'not_your_turn');
+  assert.deepEqual(getLegalActions(out, 'p3'), []);
+});
+
 test('trade: jail cards can change hands', () => {
   const s = edit(mk(), (c) => { c.players[0].jailCards = [{ deck: 'fortune', id: 'f9' }]; });
   let t = act(s, 'propose_trade', { to: 'p2', give: { jailCards: 1 }, get: { cash: 100 } }).state;
@@ -610,7 +637,7 @@ test('applyAction never mutates its input, and failures leave no trace', () => {
 
 test('getLegalActions reflects phase and player', () => {
   const s = mk();
-  assert.deepEqual(getLegalActions(s, 'p2'), []);
+  assert.deepEqual(getLegalActions(s, 'p2'), [{ type: 'propose_trade', free: true }]);
   assert.ok(getLegalActions(s, 'p1').some((a) => a.type === 'roll'));
   const j = jailed();
   const types = getLegalActions(j, 'p1').map((a) => a.type);

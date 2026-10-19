@@ -457,6 +457,30 @@ function drawDiceAtlas() {
   return { cnv, rects };
 }
 
+function drawCardBacks() {
+  // Two card backs side by side: left half Fortune, right half Community Fund.
+  const cnv = document.createElement('canvas');
+  cnv.width = 1024; cnv.height = 512;
+  const g = cnv.getContext('2d');
+  const draw = (x, color, label, glyph) => {
+    g.fillStyle = '#fffcf2';
+    g.fillRect(x, 0, 512, 512);
+    g.fillStyle = color;
+    g.beginPath(); g.roundRect(x + 22, 22, 468, 468, 26); g.fill();
+    g.strokeStyle = 'rgba(255,255,255,0.55)'; g.lineWidth = 6;
+    g.beginPath(); g.roundRect(x + 44, 44, 424, 424, 18); g.stroke();
+    g.fillStyle = '#fff';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = `900 210px ${FONT}`;
+    g.fillText(glyph, x + 256, 215);
+    g.font = `800 58px ${FONT}`;
+    g.fillText(label, x + 256, 395);
+  };
+  draw(0, '#d9822b', 'FORTUNE', '?');
+  draw(512, '#8a5a2b', 'COMMUNITY', '◆');
+  return cnv;
+}
+
 function radialTexture(inner, outer, ring = false) {
   const cnv = document.createElement('canvas');
   cnv.width = cnv.height = 128;
@@ -576,6 +600,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
   const diceTex = texture(atlas.cnv);
   const shadowTex = texture(radialTexture('rgba(0,0,0,0.55)', 'rgba(0,0,0,0)'));
   const ringTex = texture(radialTexture(null, null, true));
+  const cardTex = texture(drawCardBacks());
 
   const M = {
     plane: mesh(planeGeo()),
@@ -585,6 +610,20 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
     // face order +x,-x,+y,-y,+z,-z -> values 3,4,1,6,2,5 (opposite faces sum to 7)
     die: mesh(boxGeo(DIE, DIE, DIE, [3, 4, 1, 6, 2, 5].map((v) => atlas.rects[v]))),
   };
+  // Card piles: top face shows the card back, the sides show paper edges.
+  const EDGE = [0.004, 0.004, 0.012, 0.012];
+  const cardMesh = (deck) => {
+    const top = deck === 'fortune' ? [0.02, 0.06, 0.48, 0.94] : [0.52, 0.06, 0.98, 0.94];
+    return mesh(boxGeo(1, 1, 1, [EDGE, EDGE, top, EDGE, EDGE, EDGE]));
+  };
+  M.card = { fortune: cardMesh('fortune'), community: cardMesh('community') };
+  // Pile spots match the dashed outlines drawn in the middle of the board.
+  const PILE = {
+    fortune: { at: [-1.84, -1.84], yaw: Math.PI / 4 },
+    community: { at: [1.84, 1.84], yaw: Math.PI / 4 },
+  };
+  const CARD_W = 1.7, CARD_D = 1.0, CARD_T = 0.012;
+  let flying = null; // { deck, p, q }
   const FACE_UP = {
     1: quat.id(),
     6: quat.axis([1, 0, 0], Math.PI),
@@ -611,7 +650,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
   let dirty = true;
   const tweens = new Set();
 
-  const api = { onSpace: null };
+  const api = { onSpace: null, onCard: null };
 
   // ----- camera
   function fitRadius() {
@@ -710,6 +749,14 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
       draw(M.pawn, trs([t.x, t.lift, t.z], undefined, 1.05), t.color, null, { spec: 0.6 });
     }
     for (const d of dice) draw(M.die, trs(d.p, d.q), [1, 1, 1], diceTex, { spec: 0.35 });
+    for (const deck of ['fortune', 'community']) {
+      const n = Math.max(state?.deckSizes?.[deck] ?? 16, 1) - (flying?.deck === deck ? 1 : 0);
+      if (n <= 0) continue;
+      const h = n * CARD_T;
+      const pl = PILE[deck];
+      draw(M.card[deck], trs([pl.at[0], h / 2, pl.at[1]], quat.axis([0, 1, 0], pl.yaw), [CARD_W, h, CARD_D]), [1, 1, 1], cardTex, { spec: 0.15 });
+    }
+    if (flying) draw(M.card[flying.deck], trs(flying.p, flying.q, [CARD_W, CARD_T * 1.5, CARD_D]), [1, 1, 1], cardTex, { spec: 0.3 });
 
     // transparent: shadows, rings, selection
     gl.enable(gl.BLEND);
@@ -725,6 +772,10 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
     for (const d of dice) {
       const s = DIE * 1.6 * (1 + (d.p[1] - DIE / 2) * 0.35);
       draw(M.plane, trs([d.p[0] + 0.06, 0.003, d.p[2] + 0.06], undefined, [s, 1, s]), [1, 1, 1, 0.9 / (1 + (d.p[1] - DIE / 2) * 0.8)], shadowTex, { lit: false });
+    }
+    for (const deck of ['fortune', 'community']) {
+      const pl = PILE[deck];
+      draw(M.plane, trs([pl.at[0] + 0.05, 0.002, pl.at[1] + 0.05], quat.axis([0, 1, 0], pl.yaw), [CARD_W * 1.25, 1, CARD_D * 1.35]), [1, 1, 1, 0.45], shadowTex, { lit: false });
     }
     if (selected !== null) {
       const k = Math.floor(selected / 10);
@@ -894,9 +945,47 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
     diceShown = true;
   }
 
+  function nlerp(a, b, t) {
+    const dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+    const s = dot < 0 ? -1 : 1;
+    const q = a.map((v, i) => lerp(v, b[i] * s, t));
+    const l = Math.hypot(...q) || 1;
+    return q.map((v) => v / l);
+  }
+
+  /** Lift the top card off its pile, hold it up to the camera, then tuck it under the pile. */
+  async function drawCardAnim(ev, speed) {
+    const pl = PILE[ev.deck];
+    if (!pl) return api.onCard?.(ev, speed);
+    const n = Math.max(state?.deckSizes?.[ev.deck] ?? 16, 1);
+    const start = [pl.at[0], n * CARD_T, pl.at[1]];
+    const q0 = quat.axis([0, 1, 0], pl.yaw);
+    // Face the camera: yaw to the camera's side, then tilt the face up towards it.
+    const q1 = quat.mul(quat.axis([0, 1, 0], cam.theta), quat.axis([1, 0, 0], Math.PI / 2 - cam.phi));
+    const look = [Math.sin(cam.theta), 0, Math.cos(cam.theta)];
+    const end = [look[0] * 1.6, 2.3, 0.35 + look[2] * 1.6];
+    flying = { deck: ev.deck, p: start, q: q0 };
+    await tween(0.7 / speed, (t) => {
+      const e = easeInOut(t);
+      flying.p = [lerp(start[0], end[0], e), lerp(start[1], end[1], e) + Math.sin(Math.PI * t) * 0.6, lerp(start[2], end[2], e)];
+      flying.q = nlerp(q0, quat.mul(q1, quat.axis([0, 0, 1], (1 - e) * 0.4)), e);
+    });
+    await api.onCard?.(ev, speed);
+    const back = flying.p;
+    const qb = flying.q;
+    await tween(0.35 / speed, (t) => {
+      const e = easeInOut(t);
+      flying.p = [lerp(back[0], start[0], e), lerp(back[1], 0.01, e), lerp(back[2], start[2], e)];
+      flying.q = nlerp(qb, q0, e);
+    });
+    flying = null;
+    dirty = true;
+  }
+
   /** Animate a batch of engine events. Resolves when done. */
   api.play = async (events, next, speed = 1) => {
     if (!state || document.hidden || !events?.length) return;
+    if (next?.deckSizes) state = { ...state, deckSizes: state.deckSizes ?? next.deckSizes };
     animating = true;
     try {
       for (const ev of events) {
@@ -918,7 +1007,9 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
           await hop(t, 10, true, 0.75 / speed, 2.2);
         } else if (ev.type === 'jail_release' && t) {
           await hop(t, 10, false, 0.3 / speed, 0.5);
-        } else if (ev.type === 'card' || ev.type === 'bought' || ev.type === 'auction_won') {
+        } else if (ev.type === 'card') {
+          await drawCardAnim(ev, speed);
+        } else if (ev.type === 'bought' || ev.type === 'auction_won') {
           await tween(0.25 / speed, () => {});
         }
       }

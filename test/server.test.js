@@ -242,6 +242,34 @@ test('reconnecting with the same token replaces the old stream and resends state
   }
 });
 
+test('any player can offer a trade; unanswered offers expire', async () => {
+  const ctx = await startServer({ tradeTimeout: 300 });
+  try {
+    const host = (await post(ctx.base, '/api/rooms', { name: 'Ana' })).body;
+    const bob = (await post(ctx.base, `/api/rooms/${host.code}/join`, { name: 'Bob' })).body;
+    const cat = (await post(ctx.base, `/api/rooms/${host.code}/join`, { name: 'Cat' })).body;
+    const bs = connect(ctx, host.code, bob.token);
+    await bs.ready;
+    await post(ctx.base, `/api/rooms/${host.code}/host`, { token: host.token, op: 'start' });
+    const first = (await bs.wait((e) => e.type === 'state')).data.state;
+    // Pick two players who are NOT on turn.
+    const seats = { [host.id]: host, [bob.id]: bob, [cat.id]: cat };
+    const waiting = first.players.map((p) => p.id).filter((id) => id !== first.players[first.current].id);
+    const [from, to] = waiting.map((id) => seats[id]);
+    const offer = await post(ctx.base, `/api/rooms/${host.code}/action`, {
+      token: from.token, action: { type: 'propose_trade', to: to.id, give: { cash: 100 }, get: {} },
+    });
+    assert.equal(offer.status, 200, JSON.stringify(offer.body));
+    const pending = await bs.wait((e) => e.type === 'state' && e.data.state.phase === 'trade');
+    assert.ok(pending.data.tradeMsLeft > 0 && pending.data.tradeMsLeft <= 300);
+    const expired = await bs.next((e) => e.type === 'state' && e.data.events.some((x) => x.type === 'trade_declined'), 3000);
+    assert.equal(expired.data.state.phase, 'roll');
+    assert.equal(expired.data.tradeMsLeft, null);
+  } finally {
+    await ctx.stop();
+  }
+});
+
 test('the web client and the engine modules are served', async () => {
   const ctx = await startServer();
   try {

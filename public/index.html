@@ -55,10 +55,7 @@
           <summary>My properties</summary>
           <div id="mine"></div>
         </details>
-        <details id="trade-box">
-          <summary>Propose a trade</summary>
-          <form id="trade-form"></form>
-        </details>
+        <div id="trade-banner" class="trade-banner" hidden></div>
         <ol id="log" class="log"></ol>
         <form id="chat-form" class="row">
           <input id="chat-input" maxlength="200" placeholder="Say something…" autocomplete="off">
@@ -67,6 +64,8 @@
       </aside>
     </section>
   </main>
+  <div id="trade-modal" class="overlay" hidden></div>
+  <div id="card-popup" class="overlay card-overlay" hidden></div>
   <script type="module" src="app.js"></script>
 </body>
 </html>
