@@ -540,6 +540,56 @@ function statusText() {
   }
 }
 
+// ------------------------------------------------------------ auto end turn
+
+const AUTO_END_SECONDS = 4;
+const autoEnd = { timer: null, deadline: 0 };
+function autoEndOn() {
+  try { return localStorage.getItem('estate-auto-end') !== 'off'; } catch { return true; }
+}
+function setAutoEnd(on) {
+  try { localStorage.setItem('estate-auto-end', on ? 'on' : 'off'); } catch { /* ignore */ }
+}
+function stopAutoEnd() {
+  clearInterval(autoEnd.timer);
+  autoEnd.timer = null;
+  const b = document.querySelector('#actions button[data-action="end_turn"]');
+  if (b) b.textContent = 'End turn';
+}
+/** Count down on the End turn button and press it, unless the player is busy. */
+function scheduleAutoEnd() {
+  stopAutoEnd();
+  const busy = tradeUI.isOpen() || !$('card-popup').hidden || !$('trade-modal').hidden;
+  const canEnd = game?.legal.some((a) => a.type === 'end_turn');
+  if (!canEnd || !autoEndOn() || busy) return;
+  autoEnd.deadline = Date.now() + AUTO_END_SECONDS * 1000;
+  const tick = () => {
+    const b = document.querySelector('#actions button[data-action="end_turn"]');
+    if (!b || b.disabled) return stopAutoEnd();
+    if (tradeUI.isOpen() || !$('card-popup').hidden) {
+      // paused while the player is busy; start over afterwards
+      autoEnd.deadline = Date.now() + AUTO_END_SECONDS * 1000;
+      b.textContent = 'End turn';
+      return;
+    }
+    const left = Math.ceil((autoEnd.deadline - Date.now()) / 1000);
+    if (left <= 0) {
+      stopAutoEnd();
+      act({ type: 'end_turn' });
+      return;
+    }
+    b.textContent = `End turn (${left})`;
+  };
+  tick();
+  autoEnd.timer = setInterval(tick, 200);
+}
+// Doing something with your properties restarts the countdown.
+document.addEventListener('pointerdown', (e) => {
+  if (autoEnd.timer && e.target.closest?.('#mine, #trade-banner, .board-tools')) {
+    autoEnd.deadline = Date.now() + AUTO_END_SECONDS * 1000;
+  }
+}, true);
+
 function renderSide() {
   const { state, legal } = game;
   $('status').textContent = statusText();
@@ -558,13 +608,20 @@ function renderSide() {
       const danger = a.type === 'declare_bankruptcy';
       buttons.push(el('button', {
         class: ['roll', 'buy', 'end_turn', 'pay_debt'].includes(a.type) ? 'primary' : '',
+        'data-action': a.type,
         onclick: () => (!danger || confirm('Give up and go bankrupt?')) && act({ type: a.type }),
       }, LABEL[a.type]));
     }
   }
   const p = me();
   if (p?.bankrupt) buttons.push(el('div', { class: 'tag' }, "You're out. You can keep watching."));
+  if (legal.some((a) => a.type === 'end_turn')) {
+    buttons.push(el('label', { class: 'auto-end', title: 'End your turn by itself a few seconds after your move' },
+      el('input', { type: 'checkbox', checked: autoEndOn() || null, onchange: (e) => { setAutoEnd(e.target.checked); scheduleAutoEnd(); } }),
+      'Auto end turn'));
+  }
   $('actions').replaceChildren(...buttons);
+  scheduleAutoEnd();
 
   const isHost = lobby.hostId === session.id;
   $('players').replaceChildren(...state.players.map((pl) => {

@@ -402,3 +402,5 @@ button.deed:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.5
 }
 .cam-hint.fade { opacity: 0; }
 .cam-hint[hidden] { display: none; }
+.auto-end { flex-direction: row; align-items: center; gap: 6px; font-weight: 400; font-size: 13px; color: var(--muted); width: 100%; cursor: pointer; }
+.auto-end input { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }
