@@ -5,7 +5,8 @@
 //   rotation: [axisX, axisY, axisZ, angle]
 // Pieces face +z (their direction of travel) and stand on y = 0.
 
-const BASE = [['cyl', [0, 0, 0], [0.3, 0.04, 0.3], 'P']];
+// No base disc: pieces stand straight on the board.
+const BASE = [];
 const eye = (x, y, z, r = 0.022) => ['sphere', [x, y, z], [r, r, r], '#15171a'];
 
 export const PIECES = [

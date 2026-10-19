@@ -642,7 +642,6 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   const atlas = drawDiceAtlas();
   const diceTex = texture(atlas.cnv);
   const shadowTex = texture(radialTexture('rgba(0,0,0,0.55)', 'rgba(0,0,0,0)'));
-  const ringTex = texture(radialTexture(null, null, true));
   const cardTex = texture(drawCardBacks());
   const GLOW_PAD = 0.14; // world units the glow spills past the square
   const glowEdgeTex = texture(glowTexture(256, 512, [GLOW_PAD / (W + 2 * GLOW_PAD), GLOW_PAD / (C + 2 * GLOW_PAD)]));
@@ -785,7 +784,8 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   const pieceColors = new Map();
   function drawPiece(id, t) {
     const piece = pieceOf(id);
-    const base = trs([t.x, t.lift, t.z], quat.axis([0, 1, 0], t.yaw ?? 0), 1.15);
+    // pieces were designed on a 0.035-high base; without it, lower them onto the board
+    const base = trs([t.x, t.lift - 0.035 * 1.15, t.z], quat.axis([0, 1, 0], t.yaw ?? 0), 1.15);
     const dark = t.color.map((c) => c * 0.62);
     for (const [shape, at, sc, col, rot] of piece.parts) {
       let c;
@@ -883,7 +883,6 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
       }
     }
 
-    const current = state && !state.winner ? state.players[state.current]?.id : null;
     for (const [id, t] of tokens) {
       if (!t.visible) continue;
       drawPiece(id, t);
@@ -914,9 +913,6 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
       if (!t.visible) continue;
       const s = 0.42 * (1 + t.lift * 0.4);
       draw(M.plane, trs([t.x + 0.03, 0.003, t.z + 0.03], undefined, [s, 1, s]), [1, 1, 1, 1 / (1 + t.lift * 1.5)], shadowTex, { lit: false });
-      if (id === current) {
-        draw(M.plane, trs([t.x, 0.004, t.z], undefined, [0.46, 1, 0.46]), [...t.color, 0.95], ringTex, { lit: false });
-      }
     }
     for (const d of dice) {
       const s = DIE * 1.6 * (1 + (d.p[1] - DIE / 2) * 0.35);
