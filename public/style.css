@@ -127,7 +127,7 @@ summary { cursor: pointer; font-weight: 600; }
 .cell .bld { font-size: 10px; letter-spacing: -1px; }
 .cell .tokens { display: flex; flex-wrap: wrap; gap: 1px; margin-top: auto; }
 .cell .tokens .dot { width: 10px; height: 10px; }
-.cell.last { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cell.last { outline: 3px solid var(--pc, var(--accent)); outline-offset: -3px; background: color-mix(in srgb, var(--pc, var(--accent)) 28%, var(--panel)); }
 .center {
   grid-row: 2 / 11; grid-column: 2 / 11; background: var(--board);
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; padding: 10px;

@@ -714,6 +714,9 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   let lastNow = 0;
   // Squares the moving piece is about to cross: { id, cells, passed, color, alpha }
   let path = null;
+  // Where the moving piece will land: { pos, color, alpha } (stays a moment after arrival)
+  let landing = null;
+  let landingFade = 0;
   const badge = document.createElement('div');
   badge.className = 'step-badge';
   badge.hidden = true;
@@ -801,6 +804,10 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   const SIDE_YAW = [-Math.PI / 2, Math.PI, Math.PI / 2, 0];
   const SIDE_DIR = [[-1, 0], [0, -1], [1, 0], [0, 1]];
   const sideOf = (pos) => Math.floor(((pos % 40) + 40) % 40 / 10);
+  const cellCenter = (pos) => {
+    const [x0, y0, x1, y1] = frameRect(pos % 10);
+    return frameToWorld(sideOf(pos), (x0 + x1) / 2, (y0 + y1) / 2);
+  };
 
   function buildingList() {
     const out = [];
@@ -885,6 +892,17 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
       draw(M.card[deck], trs([pl.at[0], h / 2, pl.at[1]], quat.axis([0, 1, 0], pl.yaw), [CARD_W, h, CARD_D]), [1, 1, 1], cardTex, { spec: 0.15 });
     }
     if (flying) draw(M.card[flying.deck], trs(flying.p, flying.q, [CARD_W, CARD_T * 1.5, CARD_D]), [1, 1, 1], cardTex, { spec: 0.3 });
+    if (landing && landing.alpha > 0.02) {
+      // a bobbing arrow in the player's colour pointing at the landing square
+      const [cx, cz] = cellCenter(landing.pos);
+      const bob = 0.12 * Math.sin(lastNow / 220);
+      // bigger when the camera is far away, so it reads in the overview too
+      const sc = landing.alpha * Math.min(1.9, Math.max(1, cam.r / 8));
+      const down = quat.axis([1, 0, 0], Math.PI);
+      const spin = quat.axis([0, 1, 0], lastNow / 600);
+      draw(M.cone, trs([cx, 0.5 + 0.45 * sc + bob, cz], quat.mul(spin, down), [0.46 * sc, 0.46 * sc, 0.46 * sc]), landing.color, null, { spec: 0.5 });
+      draw(M.cyl, trs([cx, 0.5 + 0.45 * sc + bob, cz], spin, [0.2 * sc, 0.32 * sc, 0.2 * sc]), landing.color, null, { spec: 0.5 });
+    }
 
     // transparent: shadows, rings, selection
     gl.enable(gl.BLEND);
@@ -910,6 +928,22 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
       const pl = PILE[deck];
       draw(M.plane, trs([pl.at[0] + 0.05, 0.002, pl.at[1] + 0.05], quat.axis([0, 1, 0], pl.yaw), [CARD_W * 1.25, 1, CARD_D * 1.35]), [1, 1, 1, 0.45], shadowTex, { lit: false });
     }
+    if (landing && landing.alpha > 0.02) {
+      const pos = landing.pos;
+      const k = sideOf(pos), corner = pos % 10 === 0;
+      const [x0, y0, x1, y1] = frameRect(pos % 10);
+      const [cx, cz] = cellCenter(pos);
+      const q = quat.axis([0, 1, 0], (-k * Math.PI) / 2);
+      const pulse = 0.85 + 0.15 * Math.sin(lastNow / 160);
+      // solid wash of the player's colour over the square
+      draw(M.plane, trs([cx, 0.0055, cz], q, [x1 - x0, 1, y1 - y0]), [...landing.color, 0.55 * landing.alpha], null, { lit: false });
+      // bright outline in the same colour
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+      const gw = [x1 - x0 + 2 * GLOW_PAD, 1, y1 - y0 + 2 * GLOW_PAD];
+      draw(M.plane, trs([cx, 0.0065, cz], q, gw), [...landing.color, landing.alpha * pulse], corner ? glowCornerTex : glowEdgeTex, { lit: false });
+      draw(M.plane, trs([cx, 0.0066, cz], q, gw), [...landing.color, landing.alpha * pulse * 0.7], corner ? glowCornerTex : glowEdgeTex, { lit: false });
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    }
     if (path && path.alpha > 0) {
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // additive: glows brighten the board
       const pulse = 0.8 + 0.2 * Math.sin(lastNow / 160);
@@ -917,6 +951,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
       path.cells.forEach((pos, i) => {
         if (i < path.passed) return;
         const last = i === path.cells.length - 1;
+        if (last && landing) return; // the landing square has its own highlight
         const k = sideOf(pos), corner = pos % 10 === 0;
         const [x0, y0, x1, y1] = frameRect(pos % 10);
         const [cx, cz] = frameToWorld(k, (x0 + x1) / 2, (y0 + y1) / 2);
@@ -999,7 +1034,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     const dt = Math.min(0.1, (now - (lastNow || now)) / 1000);
     lastNow = now;
     if (follow.on && updateFollow(dt)) dirty = true;
-    if (path && path.alpha > 0) dirty = true; // keep the destination pulsing
+    if ((path && path.alpha > 0) || (landing && landing.alpha > 0)) dirty = true; // keep highlights pulsing
     for (const tw of [...tweens]) {
       const t = Math.min(1, (now - tw.start) / tw.dur);
       tw.fn(t);
@@ -1239,8 +1274,11 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
           const cells = [];
           for (let s = 0, q = pos; s < n; s++) { q = (q + dir + 40) % 40; cells.push(q); }
           path = { id: ev.player, cells, passed: 0, color: t.color, alpha: 0 };
+          landing = { pos: cells[cells.length - 1], color: t.color, alpha: 0 };
+          landingFade++;
+          const myLanding = landing;
           showBadge(n, t.color);
-          await tween((n > 12 ? 0.25 : 0.45) / speed, (k) => { path.alpha = k; });
+          await tween((n > 12 ? 0.25 : 0.45) / speed, (k) => { path.alpha = k; myLanding.alpha = k; });
           for (let s = 0; s < n; s++) {
             pos = (pos + dir + 40) % 40;
             await hop(t, pos, false, per, 0.42);
@@ -1251,6 +1289,11 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
           badge.hidden = true;
           await tween(0.6 / speed, (k) => { path.alpha = 1 - k; });
           path = null;
+          // keep the landing square lit a little longer, without holding up the game
+          const fadeId = landingFade;
+          tween(1.4 / speed, () => {}).then(() => tween(0.7 / speed, (k) => {
+            if (landingFade === fadeId && landing === myLanding) myLanding.alpha = 1 - k;
+          })).then(() => { if (landingFade === fadeId && landing === myLanding) landing = null; });
         } else if (ev.type === 'go_to_jail' && t) {
           if (follow.on) follow.id = ev.player;
           await hop(t, 10, true, 0.75 / speed, 2.2);

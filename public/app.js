@@ -478,7 +478,7 @@ function renderBoard() {
     const h = prop?.houses ?? 0;
     return el('div', {
       class: `cell${corner ? ' corner' : ''}${prop?.mortgaged ? ' mortgaged' : ''}${cur()?.pos === space.pos ? ' last' : ''}`,
-      style: `grid-row:${r};grid-column:${c}`,
+      style: `grid-row:${r};grid-column:${c}${cur()?.pos === space.pos ? `;--pc:${colorOf(cur().id)}` : ''}`,
       title: tooltip(space),
       onclick: () => showSpace(space.pos),
     },
