@@ -52,8 +52,14 @@
               <option value="free">Free cam</option>
             </select>
           </label>
+          <label class="cam-select" title="Background">
+            <span aria-hidden="true">🎨</span>
+            <select id="bg-mode" aria-label="Background"></select>
+          </label>
           <button id="reset-view" class="small" title="Reset camera">Reset view</button>
           <button id="toggle-view" class="small">2D view</button>
+          <button id="panel-toggle" class="small" type="button" hidden>Hide panel</button>
+          <button id="fullscreen" class="small" type="button" title="Fill the whole screen with the board" aria-pressed="false">⛶ Fullscreen</button>
         </div>
       </div>
       <aside class="side">
@@ -69,15 +75,15 @@
         </details>
         <div id="trade-banner" class="trade-banner" hidden></div>
         <ol id="log" class="log"></ol>
-        <div class="game-menu">
-          <button id="leave-game" class="small ghost" type="button">Leave game</button>
-          <button id="restart-game" class="small ghost" type="button" hidden>Back to lobby</button>
-        </div>
         <form id="chat-form" class="row">
           <input id="chat-input" maxlength="200" placeholder="Say something…" autocomplete="off">
           <button>Send</button>
         </form>
       </aside>
+      <div class="game-menu">
+        <button id="leave-game" class="small ghost" type="button">Leave game</button>
+        <button id="restart-game" class="small ghost" type="button" hidden>Back to lobby</button>
+      </div>
     </section>
   </main>
   <div id="trade-modal" class="overlay" hidden></div>

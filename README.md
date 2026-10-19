@@ -36,6 +36,12 @@ after 60 seconds so the game never gets stuck.
 board. When someone draws one, the top card lifts off the pile and everyone sees
 a pop-up with who drew it and what it says.
 
+**Fullscreen and backgrounds:** **⛶ Fullscreen** makes the board fill the whole
+window (and hides the browser bars where the browser allows); the side panel
+floats on top and can be hidden. The 🎨 menu picks the table the board sits on:
+Classic, Picnic, Meadow, Starry night, Candy, Wooden table or Beach (drawn in
+`public/backgrounds.js`). Both choices are per device.
+
 **Leaving and restarting:** **Leave game** hands your seat to a bot and takes
 you back to the start page so you can create or join another room. The host
 also has **Back to lobby**, which ends the game for everyone and returns the

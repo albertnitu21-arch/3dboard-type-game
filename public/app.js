@@ -7,6 +7,7 @@ import { createBoard3D } from './board3d.js';
 import { createTradeUI } from './trade.js';
 import { createMoneyUI } from './money.js';
 import { PIECES, pieceFor, pieceByKey } from './pieces.js';
+import { BACKGROUNDS } from './backgrounds.js';
 
 const $ = (id) => document.getElementById(id);
 const API = ''; // same origin; set to the server URL if the page is hosted elsewhere
@@ -89,6 +90,7 @@ function resetGameView() {
 }
 
 function leaveRoom(message = '') {
+  setFull(false);
   source?.close();
   source = null;
   session = null;
@@ -416,6 +418,7 @@ function render() {
   $('toggle-view').textContent = use3d ? '2D view' : '3D view';
   $('reset-view').hidden = !use3d;
   $('cam-mode').closest('.cam-select').hidden = !use3d;
+  $('bg-mode').closest('.cam-select').hidden = !use3d;
   if (board3d) $('cam-mode').value = board3d.mode();
   if (use3d) board3d.sync(game.state);
   else renderBoard();
@@ -758,6 +761,67 @@ $('leave-game').onclick = async () => {
 $('restart-game').onclick = () => {
   if (game?.state.winner || confirm('End this game for everyone and go back to the lobby? Progress will be lost.')) host('restart');
 };
+// ------------------------------------------------------- background + fullscreen
+
+$('bg-mode').replaceChildren(...BACKGROUNDS.map((b) => el('option', { value: b.key }, `${b.name}`)));
+function setBackground(key) {
+  if (!board3d) return;
+  board3d.setBackground(key);
+  $('bg-mode').value = board3d.background();
+  try { localStorage.setItem('estate-bg', board3d.background()); } catch { /* ignore */ }
+}
+$('bg-mode').onchange = (e) => { setBackground(e.target.value); e.target.blur(); };
+try { setBackground(localStorage.getItem('estate-bg') || 'classic'); } catch { setBackground('classic'); }
+
+let realFullscreen = false;
+function setFull(on) {
+  const was = document.body.classList.contains('full');
+  document.body.classList.toggle('full', on);
+  document.body.classList.remove('panel-hidden');
+  $('fullscreen').textContent = on ? '✕ Exit fullscreen' : '⛶ Fullscreen';
+  $('fullscreen').setAttribute('aria-pressed', String(on));
+  $('panel-toggle').hidden = !on;
+  $('panel-toggle').textContent = 'Hide panel';
+  requestAnimationFrame(updateViewInset);
+  if (on && !was) {
+    // also hide the browser's own bars where allowed (not on every phone)
+    const el = document.documentElement;
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (req) {
+      try {
+        const p = req.call(el, { navigationUI: 'hide' });
+        if (p?.then) p.then(() => { realFullscreen = true; }).catch(() => {});
+      } catch { /* not allowed */ }
+    }
+  } else if (!on && was) {
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+    realFullscreen = false;
+  }
+}
+function updateViewInset() {
+  if (!board3d) return;
+  const full = document.body.classList.contains('full');
+  const panelShown = full && !document.body.classList.contains('panel-hidden');
+  const side = document.querySelector('#game .side');
+  const wide = innerWidth > 760;
+  board3d.setViewInset(panelShown && wide && side ? side.getBoundingClientRect().width + 24 : 0);
+}
+addEventListener('resize', updateViewInset);
+$('fullscreen').onclick = () => setFull(!document.body.classList.contains('full'));
+$('panel-toggle').onclick = () => {
+  const hidden = document.body.classList.toggle('panel-hidden');
+  $('panel-toggle').textContent = hidden ? 'Show panel' : 'Hide panel';
+  updateViewInset();
+};
+document.addEventListener('fullscreenchange', () => {
+  // Esc in the browser's fullscreen also leaves our full-page view
+  if (!document.fullscreenElement && realFullscreen) { realFullscreen = false; setFull(false); }
+});
+addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.body.classList.contains('full')
+    && $('trade-modal').hidden && $('card-popup').hidden) setFull(false);
+});
+
 $('add-bot').onclick = () => host('add_bot');
 $('start').onclick = () => host('start');
 $('copy').onclick = () => navigator.clipboard?.writeText($('share').href);

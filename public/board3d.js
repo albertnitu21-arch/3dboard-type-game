@@ -10,6 +10,7 @@
 // viewed by default from +z. Space 0 (Start) is the near-right corner.
 
 import { pieceFor } from './pieces.js';
+import { bgByKey, drawTableTile } from './backgrounds.js';
 
 const MONEY_EVENTS = new Set(['pay', 'pass_start', 'gain', 'bought', 'auction_won', 'built', 'sold_building', 'mortgaged', 'unmortgaged', 'trade_done']);
 
@@ -573,10 +574,11 @@ const FS = `
 precision mediump float;
 varying vec3 vN; varying vec2 vUv; varying vec3 vW;
 uniform sampler2D uTex; uniform float uUseTex; uniform vec4 uColor;
-uniform float uLit; uniform float uSpec; uniform vec3 uLight; uniform vec3 uEye;
+uniform float uLit; uniform float uSpec; uniform vec3 uLight; uniform vec3 uEye; uniform vec2 uFade;
 void main() {
   vec4 c = uColor;
   if (uUseTex > 0.5) c *= texture2D(uTex, vUv);
+  if (uFade.y > 0.0) c.a *= 1.0 - smoothstep(uFade.x, uFade.y, length(vW.xz));
   if (uLit > 0.5) {
     vec3 n = normalize(vN);
     float d = max(dot(n, uLight), 0.0);
@@ -594,8 +596,8 @@ function hexToRgb(hex) {
 }
 
 export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf = pieceFor }) {
-  const gl = canvas.getContext('webgl', { antialias: true, alpha: false })
-    || canvas.getContext('experimental-webgl', { antialias: true, alpha: false });
+  const gl = canvas.getContext('webgl', { antialias: true, alpha: true, premultipliedAlpha: false })
+    || canvas.getContext('experimental-webgl', { antialias: true, alpha: true, premultipliedAlpha: false });
   if (!gl) return null;
 
   const compile = (type, src) => {
@@ -613,7 +615,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   gl.useProgram(prog);
   const A = { pos: gl.getAttribLocation(prog, 'aPos'), nor: gl.getAttribLocation(prog, 'aNor'), uv: gl.getAttribLocation(prog, 'aUv') };
   const U = {};
-  for (const n of ['uVP', 'uModel', 'uTex', 'uUseTex', 'uColor', 'uLit', 'uSpec', 'uLight', 'uEye']) U[n] = gl.getUniformLocation(prog, n);
+  for (const n of ['uVP', 'uModel', 'uTex', 'uUseTex', 'uColor', 'uLit', 'uSpec', 'uLight', 'uEye', 'uFade']) U[n] = gl.getUniformLocation(prog, n);
   gl.uniform3fv(U.uLight, v3.norm([0.35, 1, 0.5]));
   gl.enable(gl.DEPTH_TEST);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -631,20 +633,20 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     };
   };
   const aniso = gl.getExtension('EXT_texture_filter_anisotropic') || gl.getExtension('WEBKIT_EXT_texture_filter_anisotropic');
-  const texture = (cnv) => {
+  const texture = (cnv, repeat = false) => {
     const t = gl.createTexture();
-    uploadTexture(t, cnv);
+    uploadTexture(t, cnv, repeat);
     return t;
   };
-  function uploadTexture(t, cnv) {
+  function uploadTexture(t, cnv, repeat = false) {
     gl.bindTexture(gl.TEXTURE_2D, t);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, cnv);
     gl.generateMipmap(gl.TEXTURE_2D);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE);
     if (aniso) gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
   }
 
@@ -658,12 +660,17 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   const diceTex = texture(atlas.cnv);
   const shadowTex = texture(radialTexture('rgba(0,0,0,0.55)', 'rgba(0,0,0,0)'));
   const cardTex = texture(drawCardBacks());
+  // the table under the board: a repeating tile, one tile every 6 units
+  const TABLE = 90;
+  let background = bgByKey('classic');
+  const tableTex = texture(drawTableTile(background), true);
   const GLOW_PAD = 0.14; // world units the glow spills past the square
   const glowEdgeTex = texture(glowTexture(256, 512, [GLOW_PAD / (W + 2 * GLOW_PAD), GLOW_PAD / (C + 2 * GLOW_PAD)]));
   const glowCornerTex = texture(glowTexture(512, 512, [GLOW_PAD / (C + 2 * GLOW_PAD), GLOW_PAD / (C + 2 * GLOW_PAD)]));
 
   const M = {
     plane: mesh(planeGeo()),
+    table: mesh((() => { const g = planeGeo(); g.uv = g.uv.map((v) => v * (TABLE / 6)); return g; })()),
     roof: mesh(roofGeo()),
     // unit shapes for the player pieces (see pieces.js)
     sphere: mesh(latheGeo(Array.from({ length: 13 }, (_, i) => {
@@ -710,7 +717,6 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   };
 
   const dark = matchMedia?.('(prefers-color-scheme: dark)').matches;
-  const tableColor = dark ? [0.1, 0.13, 0.115] : [0.83, 0.8, 0.73];
 
   // ----- scene state
   let state = null;
@@ -742,8 +748,11 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   const api = { onSpace: null, onCard: null, onEvent: null };
 
   // ----- camera
+  // Pixels on the right covered by a floating panel: the board is centred in the rest.
+  let insetRight = 0;
+  const lensShift = () => (canvas.clientWidth ? insetRight / canvas.clientWidth : 0);
   function fitRadius() {
-    const aspect = canvas.clientWidth / Math.max(canvas.clientHeight, 1);
+    const aspect = (canvas.clientWidth - insetRight) / Math.max(canvas.clientHeight, 1);
     const fov = (38 * Math.PI) / 180;
     const th = Math.tan(fov / 2);
     return Math.min(Math.max(6.7 / (th * aspect), 5.6 / th, 9), 34);
@@ -759,7 +768,9 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     const view = lookAt(eye, target);
     const aspect = canvas.width / Math.max(canvas.height, 1);
     const fov = (38 * Math.PI) / 180;
-    return { eye, view, proj: perspective(fov, aspect, 0.5, 200), fov, aspect };
+    const proj = perspective(fov, aspect, 0.5, 200);
+    proj[8] = lensShift(); // shift the picture left when a panel covers the right side
+    return { eye, view, proj, fov, aspect };
   }
   function topRadius() {
     const aspect = canvas.clientWidth / Math.max(canvas.clientHeight, 1);
@@ -874,7 +885,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     if (!w || !h) return;
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
     gl.viewport(0, 0, w, h);
-    gl.clearColor(...tableColor, 1);
+    gl.clearColor(0, 0, 0, 0); // the sky behind is the page's CSS background
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     const c = camera();
     gl.uniformMatrix4fv(U.uVP, false, mul4(c.proj, c.view.m));
@@ -882,7 +893,12 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     gl.disable(gl.BLEND);
     gl.depthMask(true);
 
-    draw(M.plane, trs([0, -0.31, 0], undefined, [120, 1, 120]), tableColor, null, { lit: false });
+    // table: fades out towards the horizon into the sky
+    gl.enable(gl.BLEND);
+    gl.uniform2f(U.uFade, 16, 34);
+    draw(M.table, trs([0, -0.31, 0], undefined, [TABLE, 1, TABLE]), [1, 1, 1], tableTex, { lit: false });
+    gl.uniform2f(U.uFade, 0, 0);
+    gl.disable(gl.BLEND);
     draw(M.slab, trs([0, -0.15, 0]), [0.16, 0.2, 0.17]);
     draw(M.plane, trs([0, 0.001, 0], undefined, [L, 1, L]), [1, 1, 1], boardTex);
 
@@ -1235,7 +1251,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   });
   function boardPoint(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
-    const nx = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const nx = ((clientX - rect.left) / rect.width) * 2 - 1 + lensShift();
     const ny = 1 - ((clientY - rect.top) / rect.height) * 2;
     const c = camera();
     const th = Math.tan(c.fov / 2);
@@ -1252,7 +1268,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
 
   function pick(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
-    const nx = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const nx = ((clientX - rect.left) / rect.width) * 2 - 1 + lensShift();
     const ny = 1 - ((clientY - rect.top) / rect.height) * 2;
     const c = camera();
     const th = Math.tan(c.fov / 2);
@@ -1266,6 +1282,13 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     api.onSpace?.(selected);
   }
   api.select = (pos) => { selected = pos; dirty = true; };
+  /** Keep the board clear of a panel floating over the right edge (px). */
+  api.setViewInset = (right = 0) => {
+    if (right === insetRight) return;
+    insetRight = Math.max(0, right);
+    if (cam.auto) cam.r = camMode === 'top' ? topRadius() : fitRadius();
+    dirty = true;
+  };
   /** Place the camera (theta = turn around the board, phi = tilt, r = distance). */
   api.setCamera = ({ theta = cam.theta, phi = cam.phi, r = cam.r, target = cam.target } = {}) => {
     Object.assign(cam, { theta, phi: Math.min(Math.max(phi, 0.12), 1.5), r, target, auto: false });
@@ -1490,6 +1513,16 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     if (w <= 0) return null;
     return { x: (x / w * 0.5 + 0.5) * canvas.clientWidth, y: (1 - (y / w * 0.5 + 0.5)) * canvas.clientHeight };
   };
+
+  /** Change the table/sky theme (see backgrounds.js). */
+  api.setBackground = (key) => {
+    background = bgByKey(key);
+    uploadTexture(tableTex, drawTableTile(background), true);
+    canvas.parentElement?.style.setProperty('background', background.sky);
+    canvas.parentElement?.setAttribute('data-bg', background.key);
+    dirty = true;
+  };
+  api.background = () => background.key;
 
   api.destroy = () => {
     cancelAnimationFrame(rafId);
