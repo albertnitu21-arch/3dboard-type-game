@@ -561,54 +561,64 @@ function statusText() {
   }
 }
 
-// ------------------------------------------------------------ auto end turn
+// ------------------------------------------------- auto roll / auto end turn
 
-const AUTO_END_SECONDS = 4;
-const autoEnd = { timer: null, deadline: 0 };
-function autoEndOn() {
-  try { return localStorage.getItem('estate-auto-end') !== 'off'; } catch { return true; }
-}
-function setAutoEnd(on) {
-  try { localStorage.setItem('estate-auto-end', on ? 'on' : 'off'); } catch { /* ignore */ }
-}
-function stopAutoEnd() {
-  clearInterval(autoEnd.timer);
-  autoEnd.timer = null;
-  const b = document.querySelector('#actions button[data-action="end_turn"]');
-  if (b) b.textContent = 'End turn';
-}
-/** Count down on the End turn button and press it, unless the player is busy. */
-function scheduleAutoEnd() {
-  stopAutoEnd();
-  const busy = tradeUI.isOpen() || !$('card-popup').hidden || !$('trade-modal').hidden;
-  const canEnd = game?.legal.some((a) => a.type === 'end_turn');
-  if (!canEnd || !autoEndOn() || busy) return;
-  autoEnd.deadline = Date.now() + AUTO_END_SECONDS * 1000;
-  const tick = () => {
-    const b = document.querySelector('#actions button[data-action="end_turn"]');
-    if (!b || b.disabled) return stopAutoEnd();
-    if (tradeUI.isOpen() || !$('card-popup').hidden) {
-      // paused while the player is busy; start over afterwards
-      autoEnd.deadline = Date.now() + AUTO_END_SECONDS * 1000;
-      b.textContent = 'End turn';
-      return;
-    }
-    const left = Math.ceil((autoEnd.deadline - Date.now()) / 1000);
-    if (left <= 0) {
-      stopAutoEnd();
-      act({ type: 'end_turn' });
-      return;
-    }
-    b.textContent = `End turn (${left})`;
+// A button that presses itself after a short countdown (shown on the button),
+// unless the player is busy with a trade or a card. Each can be switched off.
+function makeAuto({ action, label, seconds, key, canRun }) {
+  const auto = { timer: null, deadline: 0 };
+  const btn = () => document.querySelector(`#actions button[data-action="${action}"]`);
+  auto.on = () => { try { return localStorage.getItem(key) !== 'off'; } catch { return true; } };
+  auto.set = (on) => { try { localStorage.setItem(key, on ? 'on' : 'off'); } catch { /* ignore */ } };
+  auto.stop = () => {
+    clearInterval(auto.timer);
+    auto.timer = null;
+    const b = btn();
+    if (b) b.textContent = label;
   };
-  tick();
-  autoEnd.timer = setInterval(tick, 200);
+  auto.restart = () => { if (auto.timer) auto.deadline = Date.now() + seconds * 1000; };
+  auto.schedule = () => {
+    auto.stop();
+    const busy = tradeUI.isOpen() || !$('card-popup').hidden || !$('trade-modal').hidden;
+    if (!game || !canRun(game.legal) || !auto.on() || busy) return;
+    auto.deadline = Date.now() + seconds * 1000;
+    const tick = () => {
+      const b = btn();
+      if (!b || b.disabled) return auto.stop();
+      if (tradeUI.isOpen() || !$('card-popup').hidden) {
+        // paused while the player is busy; start over afterwards
+        auto.deadline = Date.now() + seconds * 1000;
+        b.textContent = label;
+        return;
+      }
+      const left = Math.ceil((auto.deadline - Date.now()) / 1000);
+      if (left <= 0) {
+        auto.stop();
+        act({ type: action });
+        return;
+      }
+      b.textContent = `${label} (${left})`;
+    };
+    tick();
+    auto.timer = setInterval(tick, 200);
+  };
+  return auto;
 }
-// Doing something with your properties restarts the countdown.
+const has = (legal, t) => legal.some((a) => a.type === t);
+const autoEnd = makeAuto({
+  action: 'end_turn', label: 'End turn', seconds: 4, key: 'estate-auto-end',
+  canRun: (legal) => has(legal, 'end_turn'),
+});
+// Auto roll only for a plain roll: in jail you get to choose (pay, use a card, or roll).
+const autoRoll = makeAuto({
+  action: 'roll', label: 'Roll dice', seconds: 3, key: 'estate-auto-roll',
+  canRun: (legal) => has(legal, 'roll') && !has(legal, 'pay_jail_fine') && !has(legal, 'use_jail_card'),
+});
+function scheduleAutoEnd() { autoEnd.schedule(); autoRoll.schedule(); }
+function stopAutoEnd() { autoEnd.stop(); autoRoll.stop(); }
+// Doing something with your properties restarts the countdowns.
 document.addEventListener('pointerdown', (e) => {
-  if (autoEnd.timer && e.target.closest?.('#mine, #trade-banner, .board-tools')) {
-    autoEnd.deadline = Date.now() + AUTO_END_SECONDS * 1000;
-  }
+  if (e.target.closest?.('#mine, #trade-banner, .board-tools')) { autoEnd.restart(); autoRoll.restart(); }
 }, true);
 
 function renderSide() {
@@ -636,11 +646,11 @@ function renderSide() {
   }
   const p = me();
   if (p?.bankrupt) buttons.push(el('div', { class: 'tag' }, "You're out. You can keep watching."));
-  if (legal.some((a) => a.type === 'end_turn')) {
-    buttons.push(el('label', { class: 'auto-end', title: 'End your turn by itself a few seconds after your move' },
-      el('input', { type: 'checkbox', checked: autoEndOn() || null, onchange: (e) => { setAutoEnd(e.target.checked); scheduleAutoEnd(); } }),
-      'Auto end turn'));
-  }
+  const toggle = (auto, text, title) => el('label', { class: 'auto-end', title },
+    el('input', { type: 'checkbox', checked: auto.on() || null, onchange: (e) => { auto.set(e.target.checked); scheduleAutoEnd(); } }),
+    text);
+  if (has(legal, 'roll')) buttons.push(toggle(autoRoll, 'Auto roll', 'Roll the dice by itself a few seconds after your turn starts (not in Pușcărie)'));
+  if (has(legal, 'end_turn')) buttons.push(toggle(autoEnd, 'Auto end turn', 'End your turn by itself a few seconds after your move'));
   $('actions').replaceChildren(...buttons);
   scheduleAutoEnd();
 
