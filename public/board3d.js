@@ -322,9 +322,9 @@ function drawCorner(g, pos, r) {
     for (let k = 1; k < 5; k++) { g.beginPath(); g.moveTo(x0 + (k * s) / 5, y0); g.lineTo(x0 + (k * s) / 5, y0 + s); g.stroke(); }
     g.strokeRect(x0, y0, s, s);
     g.fillStyle = INK;
-    g.font = `900 ${0.15 * u}px ${FONT}`;
-    g.fillStyle = CELL; g.fillRect(x0 + s * 0.1, y0 + s * 0.4, s * 0.8, s * 0.22);
-    g.fillStyle = INK; g.fillText('LOCKUP', x0 + s / 2, y0 + s * 0.51);
+    g.font = `900 ${0.125 * u}px ${FONT}`;
+    g.fillStyle = CELL; g.fillRect(x0 + s * 0.06, y0 + s * 0.38, s * 0.88, s * 0.26);
+    g.fillStyle = INK; g.fillText('PUȘCĂRIE', x0 + s / 2, y0 + s * 0.52);
     g.font = `700 ${0.12 * u}px ${FONT}`;
     g.fillText('JUST', x0 + s / 2, y1 - 0.22 * u);
     g.save(); g.translate(x1 - 0.22 * u, y0 + s / 2); g.rotate(-Math.PI / 2);
@@ -341,8 +341,9 @@ function drawCorner(g, pos, r) {
   } else {
     g.fillStyle = '#c8402f';
     g.font = `900 ${0.22 * u}px ${FONT}`;
-    g.fillText('GO TO', cx, y0 + 0.5 * u);
-    g.fillText('LOCKUP', cx, y0 + 0.76 * u);
+    g.fillText('GO TO', cx, y0 + 0.48 * u);
+    g.font = `900 ${0.19 * u}px ${FONT}`;
+    g.fillText('PUȘCĂRIE', cx, y0 + 0.76 * u);
     g.strokeStyle = INK; g.lineWidth = 6;
     g.strokeRect(cx - 0.22 * u, y0 + 0.98 * u, 0.44 * u, 0.32 * u);
     for (let k = 1; k < 4; k++) {

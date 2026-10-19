@@ -360,8 +360,8 @@ function describe(e) {
     case 'rent': return `${nameOf(e.player)} owes ${nameOf(e.owner)} ${e.amount} rent`;
     case 'pay': return e.reason === 'rent' ? null : `${nameOf(e.from)} paid ${e.to === 'bank' ? 'the bank' : nameOf(e.to)} ${e.amount}`;
     case 'card': return `${nameOf(e.player)} drew: “${e.text}”`;
-    case 'go_to_jail': return `${nameOf(e.player)} went to the Lockup`;
-    case 'jail_release': return `${nameOf(e.player)} left the Lockup (${e.reason})`;
+    case 'go_to_jail': return `${nameOf(e.player)} went to Pușcărie`;
+    case 'jail_release': return `${nameOf(e.player)} left Pușcărie (${e.reason})`;
     case 'auction_start': return `Auction for ${sp(e.pos)}`;
     case 'bid': return `${nameOf(e.player)} bid ${e.amount}`;
     case 'auction_won': return `${nameOf(e.player)} won ${sp(e.pos)} for ${e.amount}`;

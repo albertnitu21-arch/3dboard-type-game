@@ -71,7 +71,7 @@ export function createTradeUI({ root, banner, getGame, myId, nameOf, colorOf, se
   const jailCard = ({ onclick, selected } = {}) => el(onclick ? 'button' : 'div', {
     type: onclick ? 'button' : null, class: `deed jail sm${selected ? ' sel' : ''}`, onclick, 'aria-pressed': onclick ? String(selected) : null,
   },
-  el('span', { class: 'deed-head' }, el('small', {}, 'CARD'), el('b', {}, 'Get out of Lockup free')),
+  el('span', { class: 'deed-head' }, el('small', {}, 'CARD'), el('b', {}, 'Get out of Pușcărie free')),
   el('span', { class: 'deed-body' }, el('span', { class: 'icon' }, '🔓')),
   el('span', { class: 'deed-foot' }, `worth ~${JAIL_VALUE}`),
   selected && onclick ? el('span', { class: 'check', 'aria-hidden': 'true' }, '✓') : null);
