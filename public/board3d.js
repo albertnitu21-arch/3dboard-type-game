@@ -11,6 +11,7 @@
 
 import { pieceFor } from './pieces.js';
 import { bgByKey, drawTableTile } from './backgrounds.js';
+import { sfx } from './sounds.js';
 
 const MONEY_EVENTS = new Set(['pay', 'pass_start', 'gain', 'bought', 'auction_won', 'built', 'sold_building', 'mortgaged', 'unmortgaged', 'trade_done']);
 
@@ -1342,6 +1343,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     }
     const turnFn = t._turn;
     t._turn = null;
+    const quiet = document.hidden;
     await tween(seconds, (k) => {
       const e = easeInOut(k);
       t.x = lerp(ax, bx, e); t.z = lerp(az, bz, e);
@@ -1349,9 +1351,11 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
       turnFn?.(k);
     });
     t.pos = toPos; t.inJail = toJail; t.lift = 0;
+    if (!quiet) sfx.hop();
   }
 
   async function rollDice(values, speed) {
+    sfx.dice();
     const dur = 1.25 / speed;
     const throwFrom = [cam.theta, Math.random() < 0.5 ? -1 : 1];
     const plans = values.map((v, i) => {
@@ -1392,6 +1396,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
 
   /** Lift the top card off its pile, hold it up to the camera, then tuck it under the pile. */
   async function drawCardAnim(ev, speed) {
+    sfx.card();
     const pl = PILE[ev.deck];
     if (!pl) return api.onCard?.(ev, speed);
     const n = Math.max(state?.deckSizes?.[ev.deck] ?? 16, 1);
@@ -1465,6 +1470,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
           })).then(() => { if (landingFade === fadeId && landing === myLanding) landing = null; });
         } else if (ev.type === 'go_to_jail' && t) {
           if (follow.on) follow.id = ev.player;
+          sfx.jail();
           await hop(t, 10, true, 0.75 / speed, 2.2);
         } else if (ev.type === 'jail_release' && t) {
           await hop(t, 10, false, 0.3 / speed, 0.5);
@@ -1473,6 +1479,8 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
           const from = ev.type === 'built' ? to - 1 : to + 1;
           const anim = { from, to, t: 0 };
           buildAnims.set(ev.pos, anim);
+          if (ev.type === 'built') setTimeout(() => sfx.build(), (to === 5 ? 650 : 280) / speed);
+          else sfx.sell();
           await tween((ev.type === 'built' ? (to === 5 ? 1.1 : 0.75) : 0.55) / speed, (t) => { anim.t = t; });
         } else if (ev.type === 'card') {
           await drawCardAnim(ev, speed);

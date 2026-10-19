@@ -3,6 +3,7 @@
 // token on the 3D board).
 
 import { BOARD } from './engine/board.js';
+import { sfx } from './sounds.js';
 
 const fmt = (n) => Math.round(n).toLocaleString();
 
@@ -104,6 +105,7 @@ export function createMoneyUI({ getState, tokenPos, boardEl }) {
       return;
     }
     anims.set(id, { from, to, start: performance.now(), dur: Math.min(1400, 500 + Math.abs(amount) * 1.2) });
+    if (amount > 0) sfx.coin(); else sfx.pay();
     if (!running) { running = true; requestAnimationFrame(tick); }
 
     const up = amount > 0;

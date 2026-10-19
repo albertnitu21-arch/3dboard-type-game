@@ -8,6 +8,7 @@ import { createTradeUI } from './trade.js';
 import { createMoneyUI } from './money.js';
 import { PIECES, pieceFor, pieceByKey } from './pieces.js';
 import { BACKGROUNDS } from './backgrounds.js';
+import { sfx, soundOn, setSound } from './sounds.js';
 
 const $ = (id) => document.getElementById(id);
 const API = ''; // same origin; set to the server URL if the page is hosted elsewhere
@@ -290,11 +291,16 @@ async function drain() {
       // The 3D board shows drawn cards and money changes as it animates; the flat
       // board does it here.
       for (const ev of d.events) {
-        if (ev.type === 'card') await showCardPopup(ev, speed);
+        if (ev.type === 'roll') sfx.dice();
+        if (ev.type === 'go_to_jail') sfx.jail();
+        if (ev.type === 'built') sfx.build();
+        if (ev.type === 'card') { sfx.card(); await showCardPopup(ev, speed); }
         money.apply(ev);
       }
     }
+    const before = game?.state;
     game = { state: d.state, legal: d.legal, tradeMsLeft: d.tradeMsLeft ?? null, receivedAt: Date.now() };
+    playStateSounds(before, d.state, d.events);
     const pc = d.pendingCard;
     if (pc && !shownCards.has(pc.seq) && !closedCards.has(pc.seq) && !d.events.some((e) => e.type === 'card')) {
       // e.g. after a reload: the card is still waiting for its OK
@@ -308,6 +314,17 @@ async function drain() {
     money.reconcile();
   }
   draining = false;
+}
+
+/** Chimes for things that need your attention. */
+function playStateSounds(before, after, events) {
+  if (!before || !session) return;
+  if (events.some((e) => e.type === 'game_over')) { sfx.win(); return; }
+  const me = session.id;
+  const nowMine = after.players[after.current]?.id === me && after.phase === 'roll';
+  const wasMine = before.players[before.current]?.id === me && before.phase === 'roll';
+  if (nowMine && (!wasMine || before.turn !== after.turn)) sfx.turn();
+  if (after.trade?.to === me && JSON.stringify(after.trade) !== JSON.stringify(before.trade)) sfx.notify();
 }
 
 function setView(three) {
@@ -821,6 +838,22 @@ addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && document.body.classList.contains('full')
     && $('trade-modal').hidden && $('card-popup').hidden) setFull(false);
 });
+
+// ----------------------------------------------------------------- sound
+
+function paintSoundButton() {
+  $('sound-toggle').textContent = soundOn() ? '🔊' : '🔇';
+  $('sound-toggle').setAttribute('aria-pressed', String(soundOn()));
+  $('sound-toggle').title = soundOn() ? 'Sound on (click to mute)' : 'Sound off (click to turn on)';
+}
+$('sound-toggle').onclick = () => { setSound(!soundOn()); paintSoundButton(); };
+paintSoundButton();
+// a soft click for buttons and menus
+document.addEventListener('click', (e) => {
+  const b = e.target.closest?.('button, .pick, .chip, summary');
+  if (b && !b.disabled && b.id !== 'sound-toggle') sfx.click();
+}, true);
+document.addEventListener('change', (e) => { if (e.target.matches?.('select, input[type=checkbox]')) sfx.click(); }, true);
 
 $('add-bot').onclick = () => host('add_bot');
 $('start').onclick = () => host('start');
