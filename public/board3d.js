@@ -9,6 +9,8 @@
 // World layout: the board is 11 x 11 units centred on the origin, top face at y = 0,
 // viewed by default from +z. Space 0 (Start) is the near-right corner.
 
+const MONEY_EVENTS = new Set(['pay', 'pass_start', 'gain', 'bought', 'auction_won', 'built', 'sold_building', 'mortgaged', 'unmortgaged', 'trade_done']);
+
 const L = 11;          // board size
 const C = 1.5;         // corner size
 const W = (L - 2 * C) / 9; // edge cell width
@@ -666,7 +668,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
   let dirty = true;
   const tweens = new Set();
 
-  const api = { onSpace: null, onCard: null };
+  const api = { onSpace: null, onCard: null, onEvent: null };
 
   // ----- camera
   function fitRadius() {
@@ -1074,13 +1076,28 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf }) {
           await tween((ev.type === 'built' ? (to === 5 ? 1.1 : 0.75) : 0.55) / speed, (t) => { anim.t = t; });
         } else if (ev.type === 'card') {
           await drawCardAnim(ev, speed);
-        } else if (ev.type === 'bought' || ev.type === 'auction_won') {
-          await tween(0.25 / speed, () => {});
         }
+        // Let the page show what this event did (money changes etc.) as it happens.
+        api.onEvent?.(ev);
+        if (MONEY_EVENTS.has(ev.type)) await tween(0.5 / speed, () => {});
       }
     } finally {
       animating = false;
     }
+  };
+
+  /** Where a player's token is on screen (CSS px inside the canvas), or null. */
+  api.screenPos = (id, height = 0.95) => {
+    const t = tokens.get(id);
+    if (!t || !t.visible) return null;
+    const c = camera();
+    const m = mul4(c.proj, c.view.m);
+    const p = [t.x, t.lift + height, t.z];
+    const x = m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12];
+    const y = m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13];
+    const w = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
+    if (w <= 0) return null;
+    return { x: (x / w * 0.5 + 0.5) * canvas.clientWidth, y: (1 - (y / w * 0.5 + 0.5)) * canvas.clientHeight };
   };
 
   api.destroy = () => {

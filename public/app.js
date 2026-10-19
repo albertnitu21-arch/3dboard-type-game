@@ -5,6 +5,7 @@ import { BOARD, GROUPS, GROUP_POSITIONS, STATION_RENTS } from '/engine/board.js'
 import { deedCard } from './deeds.js';
 import { createBoard3D } from './board3d.js';
 import { createTradeUI } from './trade.js';
+import { createMoneyUI } from './money.js';
 
 const $ = (id) => document.getElementById(id);
 const API = ''; // same origin; set to the server URL if the page is hosted elsewhere
@@ -86,6 +87,7 @@ function leaveRoom(message = '') {
   selectedSpace = null;
   tradeUI.close();
   closeCard?.();
+  money.reset();
   logLines.length = 0;
   store.clear();
   history.replaceState(null, '', location.pathname);
@@ -149,6 +151,13 @@ if (board3d) {
   board3d.onSpace = (pos) => showSpace(pos);
   board3d.onCard = (ev, speed) => showCardPopup(ev, speed);
 }
+
+const money = createMoneyUI({
+  getState: () => game?.state,
+  tokenPos: (id) => (use3d && board3d ? board3d.screenPos(id) : null),
+  boardEl: $('board3d'),
+});
+if (board3d) board3d.onEvent = (ev) => money.apply(ev);
 
 const tradeUI = createTradeUI({
   root: $('trade-modal'),
@@ -243,9 +252,13 @@ async function drain() {
     if (use3d && board3d && game) {
       try { await board3d.play(d.events, d.state, speed); } catch (err) { console.error(err); }
     }
-    if (!(use3d && board3d)) {
-      // The 3D board shows drawn cards itself; the flat board needs the pop-up here.
-      for (const ev of d.events) if (ev.type === 'card' && game) await showCardPopup(ev, speed);
+    if (!(use3d && board3d) && game) {
+      // The 3D board shows drawn cards and money changes as it animates; the flat
+      // board does it here.
+      for (const ev of d.events) {
+        if (ev.type === 'card') await showCardPopup(ev, speed);
+        money.apply(ev);
+      }
     }
     game = { state: d.state, legal: d.legal, tradeMsLeft: d.tradeMsLeft ?? null, receivedAt: Date.now() };
     const pc = d.pendingCard;
@@ -258,6 +271,7 @@ async function drain() {
       if (line) logLines.push({ text: line });
     }
     render();
+    money.reconcile();
   }
   draining = false;
 }
@@ -491,13 +505,22 @@ function renderSide() {
   $('players').replaceChildren(...state.players.map((pl) => {
     const m = lobby.members.find((x) => x.id === pl.id);
     const offline = m && !m.bot && !m.connected && !m.autoplay;
-    return el('li', { class: `${pl.id === cur().id ? 'turn' : ''}${pl.bankrupt ? ' out' : ''}` },
+    return el('li', { class: `${pl.id === cur().id ? 'turn' : ''}${pl.bankrupt ? ' out' : ''}`, 'data-flash': '' },
       el('span', { class: 'dot', style: `background:${colorOf(pl.id)}` }),
       el('span', { class: 'grow' }, pl.name, pl.id === session.id ? ' (you)' : '', pl.inJail ? ' 🔒' : ''),
       el('span', { class: 'tag' }, m?.bot ? 'bot' : m?.autoplay ? 'auto' : offline ? 'offline' : ''),
       isHost && offline && !pl.bankrupt ? el('button', { class: 'small', onclick: () => host('takeover', pl.id) }, 'Bot plays') : null,
-      el('span', { class: 'cash' }, String(pl.cash)));
+      el('span', { class: `cash ${money.direction(pl.id)}`, 'data-cash': pl.id }, money.value(pl.id)));
   }));
+  const meP = me();
+  $('wallet').hidden = !meP || meP.bankrupt;
+  if (meP && !meP.bankrupt) {
+    $('wallet').replaceChildren(
+      el('span', { class: 'dot', style: `background:${colorOf(meP.id)}` }),
+      el('span', { class: 'w-label' }, 'Your money'),
+      el('span', { class: 'w-amount' }, el('span', { class: 'w-cur' }, '¤'),
+        el('span', { class: `w-val ${money.direction(meP.id)}`, 'data-cash': meP.id }, money.value(meP.id))));
+  }
 
   renderMine();
 }

@@ -290,3 +290,48 @@ button.deed:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.5
 .deed.sm { min-height: 172px; }
 .deed.sm .deed-body { font-size: 10px; }
 .supply { margin-top: 10px; }
+
+/* money that moves */
+:root { --money-up: #1f9d55; --money-down: #d23b2f; }
+@media (prefers-color-scheme: dark) { :root { --money-up: #4cd384; --money-down: #ff6b5e; } }
+.wallet {
+  display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 10px;
+  background: var(--panel); border: 1px solid var(--line);
+}
+.w-label { color: var(--muted); font-size: 13px; flex: 1; }
+.w-amount { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.w-cur { font-size: 16px; color: var(--muted); margin-right: 4px; font-weight: 600; }
+.cash, .w-val { transition: color 0.2s; }
+.cash.up, .w-val.up { color: var(--money-up); }
+.cash.down, .w-val.down { color: var(--money-down); }
+.flash-up { animation: flash-up 1.1s ease-out; }
+.flash-down { animation: flash-down 1.1s ease-out; }
+@keyframes flash-up { 0% { background: color-mix(in srgb, var(--money-up) 30%, var(--panel)); } 100% { background: var(--panel); } }
+@keyframes flash-down { 0% { background: color-mix(in srgb, var(--money-down) 30%, var(--panel)); } 100% { background: var(--panel); } }
+.money-float {
+  position: fixed; z-index: 60; pointer-events: none; transform: translate(-100%, -50%);
+  font-weight: 800; font-size: 15px; white-space: nowrap; font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 0 var(--bg), 0 0 6px var(--bg);
+  animation: money-rise 1.8s ease-out forwards;
+}
+.money-float.up { color: var(--money-up); }
+.money-float.down { color: var(--money-down); }
+.money-float.big {
+  transform: translate(-50%, -100%); font-size: 24px; padding: 2px 10px; border-radius: 999px;
+  background: rgba(255,255,255,0.92); text-shadow: none; box-shadow: 0 3px 10px rgba(0,0,0,0.25);
+  animation-name: money-rise-big;
+}
+@keyframes money-rise {
+  0% { opacity: 0; translate: 0 6px; }
+  12% { opacity: 1; translate: 0 0; }
+  75% { opacity: 1; }
+  100% { opacity: 0; translate: 0 -34px; }
+}
+@keyframes money-rise-big {
+  0% { opacity: 0; scale: 0.6; translate: 0 10px; }
+  12% { opacity: 1; scale: 1.08; translate: 0 0; }
+  20% { scale: 1; }
+  75% { opacity: 1; }
+  100% { opacity: 0; translate: 0 -60px; }
+}
+@media (prefers-reduced-motion: reduce) { .money-float, .money-float.big { animation-duration: 1.2s; } }
