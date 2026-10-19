@@ -415,9 +415,8 @@ function render() {
   $('toggle-view').hidden = !board3d;
   $('toggle-view').textContent = use3d ? '2D view' : '3D view';
   $('reset-view').hidden = !use3d;
-  $('cam-mode').hidden = !use3d;
-  $('cam-mode').textContent = board3d?.mode() === 'follow' ? 'Overview' : 'Follow';
-  $('cam-mode').setAttribute('aria-pressed', String(board3d?.mode() === 'follow'));
+  $('cam-mode').closest('.cam-select').hidden = !use3d;
+  if (board3d) $('cam-mode').value = board3d.mode();
   if (use3d) board3d.sync(game.state);
   else renderBoard();
   renderSide();
@@ -680,14 +679,16 @@ $('join').onclick = () => homeAction((name) => {
 $('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('join').click(); });
 $('toggle-view').onclick = () => setView(!use3d);
 $('reset-view').onclick = () => board3d?.resetView();
-$('cam-mode').onclick = () => {
+$('cam-mode').onchange = (e) => {
   if (!board3d) return;
-  const next = board3d.mode() === 'follow' ? 'overview' : 'follow';
-  board3d.setMode(next);
-  try { localStorage.setItem('estate-cam', next); } catch { /* ignore */ }
-  render();
+  board3d.setMode(e.target.value);
+  try { localStorage.setItem('estate-cam', e.target.value); } catch { /* ignore */ }
+  e.target.blur(); // so W/A/S/D fly the camera instead of changing the menu
 };
-try { if (board3d && localStorage.getItem('estate-cam') === 'follow') board3d.setMode('follow'); } catch { /* ignore */ }
+try {
+  const savedCam = localStorage.getItem('estate-cam');
+  if (board3d && savedCam) board3d.setMode(savedCam);
+} catch { /* ignore */ }
 try { if (localStorage.getItem('estate-view') === '2d') use3d = false; } catch { /* ignore */ }
 $('board3d').hidden = !use3d;
 $('board').hidden = use3d;

@@ -746,9 +746,18 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     const fov = (38 * Math.PI) / 180;
     return { eye, view, proj: perspective(fov, aspect, 0.5, 200), fov, aspect };
   }
+  function topRadius() {
+    const aspect = canvas.clientWidth / Math.max(canvas.clientHeight, 1);
+    const th = Math.tan((38 * Math.PI) / 360);
+    return Math.min(Math.max(6.1 / (th * Math.min(aspect, 1)), 9), 40);
+  }
   api.resetView = () => {
     if (follow.on) { follow.yaw = 0; follow.tilt = 0; follow.zoom = 1; dirty = true; return; }
-    cam.theta = 0; cam.phi = 0.95; cam.r = fitRadius(); cam.auto = true; cam.target = null; dirty = true;
+    cam.theta = 0; cam.target = null;
+    if (camMode === 'top') { cam.phi = 1.5; cam.r = topRadius(); cam.auto = true; }
+    else if (camMode === 'free') { cam.phi = 0.95; cam.r = fitRadius(); cam.target = [0, 0, 0.35]; cam.auto = false; }
+    else { cam.phi = 0.95; cam.r = fitRadius(); cam.auto = true; }
+    dirty = true;
   };
 
   // ----- drawing
@@ -1004,14 +1013,106 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   }
 
   /** 'overview' (whole board) or 'follow' (third-person camera behind the active piece). */
+  /**
+   * Camera modes:
+   *   overview  whole board, gentle orbit
+   *   top       straight down, like a map
+   *   follow    third-person camera behind the active player
+   *   free      fly anywhere: orbit, pan, zoom, WASD
+   */
+  const MODES = ['overview', 'top', 'follow', 'free'];
+  let camMode = 'overview';
   api.setMode = (mode) => {
+    if (!MODES.includes(mode)) mode = 'overview';
+    const from = camMode;
+    camMode = mode;
     follow.on = mode === 'follow';
     follow.yaw = 0; follow.tilt = 0; follow.zoom = 1;
-    if (!follow.on) api.resetView();
-    cam.auto = !follow.on;
+    canvas.style.touchAction = mode === 'free' ? 'none' : 'pan-y';
+    if (mode === 'free') {
+      // start flying from wherever the camera is now
+      cam.target = cam.target ?? [0, 0, 0.35];
+      cam.auto = false;
+      if (from !== 'free') showHint();
+    } else if (mode !== 'follow') {
+      api.resetView();
+    } else {
+      cam.auto = false;
+    }
     dirty = true;
   };
-  api.mode = () => (follow.on ? 'follow' : 'overview');
+  api.mode = () => camMode;
+
+  // ----- free cam controls
+  const keys = new Set();
+  const typing = (el) => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+  const FLY_KEYS = new Set(['w', 'a', 's', 'd', 'q', 'e', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'r', 'f', '+', '-', '=']);
+  addEventListener('keydown', (e) => {
+    if (camMode !== 'free' || typing(document.activeElement) || e.ctrlKey || e.metaKey || e.altKey) return;
+    const k = e.key.toLowerCase();
+    if (!FLY_KEYS.has(k) || !canvas.offsetParent) return;
+    keys.add(k);
+    e.preventDefault();
+    dirty = true;
+  });
+  addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
+  addEventListener('blur', () => keys.clear());
+
+  const clampTarget = (t) => [Math.min(Math.max(t[0], -9), 9), Math.min(Math.max(t[1], 0), 4), Math.min(Math.max(t[2], -9), 9)];
+  function panBy(right, forward) {
+    const t = cam.target ?? [0, 0, 0.35];
+    const r = [Math.cos(cam.theta), 0, -Math.sin(cam.theta)];
+    const f = [-Math.sin(cam.theta), 0, -Math.cos(cam.theta)];
+    cam.target = clampTarget([t[0] + r[0] * right + f[0] * forward, t[1], t[2] + r[2] * right + f[2] * forward]);
+  }
+  function flyKeys(dt) {
+    if (camMode !== 'free' || !keys.size) return false;
+    const speed = 3.2 * Math.max(0.6, cam.r / 9) * dt;
+    const has = (...k) => k.some((x) => keys.has(x));
+    let fwd = 0, side = 0;
+    if (has('w', 'arrowup')) fwd += speed;
+    if (has('s', 'arrowdown')) fwd -= speed;
+    if (has('d', 'arrowright')) side += speed;
+    if (has('a', 'arrowleft')) side -= speed;
+    if (fwd || side) panBy(side, fwd);
+    if (has('q')) cam.theta += 1.6 * dt;
+    if (has('e')) cam.theta -= 1.6 * dt;
+    if (has('r')) cam.phi = Math.min(cam.phi + 0.9 * dt, 1.5);
+    if (has('f')) cam.phi = Math.max(cam.phi - 0.9 * dt, 0.12);
+    if (has('+', '=')) cam.r = Math.max(cam.r * (1 - 1.2 * dt), 2.5);
+    if (has('-')) cam.r = Math.min(cam.r * (1 + 1.2 * dt), 40);
+    return true;
+  }
+
+  // a short hint the first moments of free cam
+  const hint = document.createElement('div');
+  hint.className = 'cam-hint';
+  hint.hidden = true;
+  canvas.parentElement?.append(hint);
+  let hintTimer = 0;
+  function showHint() {
+    const touch = matchMedia?.('(pointer: coarse)').matches;
+    hint.textContent = touch
+      ? '1 finger: look around · 2 fingers: zoom & move · double-tap: go there'
+      : 'Drag: look · Right-drag / Shift-drag: move · Scroll: zoom · WASD/arrows: fly · Q/E: turn · R/F: tilt · Double-click: go there';
+    hint.hidden = false;
+    hint.classList.remove('fade');
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => hint.classList.add('fade'), 5500);
+    setTimeout(() => { if (hint.classList.contains('fade')) hint.hidden = true; }, 7000);
+  }
+
+  /** Glide the free camera's focus to a point on the board. */
+  function glideTo(x, z) {
+    const from = cam.target ?? [0, 0, 0.35];
+    const to = clampTarget([x, 0, z]);
+    const r0 = cam.r, r1 = Math.min(cam.r, 7);
+    tween(0.6, (k) => {
+      const e = easeInOut(k);
+      cam.target = from.map((v, i) => lerp(v, to[i], e));
+      cam.r = lerp(r0, r1, e);
+    });
+  }
 
   let rafId = 0;
   function frame(now) {
@@ -1019,6 +1120,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     const dt = Math.min(0.1, (now - (lastNow || now)) / 1000);
     lastNow = now;
     if (follow.on && updateFollow(dt)) dirty = true;
+    if (flyKeys(dt)) dirty = true;
     if ((path && path.alpha > 0) || (landing && landing.alpha > 0)) dirty = true; // keep highlights pulsing
     for (const tw of [...tweens]) {
       const t = Math.min(1, (now - tw.start) / tw.dur);
@@ -1037,19 +1139,22 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     });
   }
 
-  const ro = new ResizeObserver(() => { if (cam.auto) cam.r = fitRadius(); dirty = true; });
+  const ro = new ResizeObserver(() => { if (cam.auto) cam.r = camMode === 'top' ? topRadius() : fitRadius(); dirty = true; });
   ro.observe(canvas);
 
   // ----- input
   const pointers = new Map();
   let dragDist = 0, pinch = null;
+  let panDrag = false;
+  canvas.addEventListener('contextmenu', (e) => { if (camMode === 'free') e.preventDefault(); });
   canvas.addEventListener('pointerdown', (e) => {
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     canvas.setPointerCapture?.(e.pointerId);
     dragDist = 0;
+    panDrag = camMode === 'free' && (e.button === 2 || e.shiftKey);
     if (pointers.size === 2) {
       const [a, b] = [...pointers.values()];
-      pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), r: cam.r, z: follow.zoom };
+      pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), r: cam.r, z: follow.zoom, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
     }
   });
   canvas.addEventListener('pointermove', (e) => {
@@ -1062,9 +1167,24 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
       const [a, b] = [...pointers.values()];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
       if (follow.on) follow.zoom = Math.min(Math.max(pinch.z * (pinch.d / Math.max(d, 1)), 0.5), 3);
-      else { cam.r = Math.min(Math.max(pinch.r * (pinch.d / Math.max(d, 1)), 6), 40); cam.auto = false; }
+      else if (camMode === 'free') {
+        cam.r = Math.min(Math.max(pinch.r * (pinch.d / Math.max(d, 1)), 2.5), 40);
+        // two-finger drag moves the camera over the board
+        const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+        const k = cam.r * 0.0022;
+        panBy(-(mx - pinch.mx) * k, (my - pinch.my) * k);
+        pinch.mx = mx; pinch.my = my;
+      } else { cam.r = Math.min(Math.max(pinch.r * (pinch.d / Math.max(d, 1)), 6), 40); cam.auto = false; }
     } else if (pointers.size === 1) {
-      if (follow.on) {
+      if (camMode === 'free') {
+        if (panDrag) {
+          const k = cam.r * 0.0022;
+          panBy(-dx * k, dy * k);
+        } else {
+          cam.theta -= dx * 0.008;
+          cam.phi = Math.min(Math.max(cam.phi + dy * 0.006, 0.12), 1.5);
+        }
+      } else if (follow.on) {
         follow.yaw -= dx * 0.008;
         if (e.pointerType === 'mouse') follow.tilt = Math.min(Math.max(follow.tilt + dy * 0.006, -0.25), 0.9);
       } else {
@@ -1085,9 +1205,35 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
     if (follow.on) follow.zoom = Math.min(Math.max(follow.zoom * Math.exp(e.deltaY * 0.0012), 0.5), 3);
+    else if (camMode === 'free') cam.r = Math.min(Math.max(cam.r * Math.exp(e.deltaY * 0.0012), 2.5), 40);
     else { cam.r = Math.min(Math.max(cam.r * Math.exp(e.deltaY * 0.0012), 6), 40); cam.auto = false; }
     dirty = true;
   }, { passive: false });
+
+  let lastTap = 0;
+  canvas.addEventListener('dblclick', (e) => { if (camMode === 'free') focusAt(e.clientX, e.clientY); });
+  canvas.addEventListener('pointerup', (e) => {
+    if (e.pointerType !== 'touch' || camMode !== 'free' || dragDist > 6) return;
+    const now = performance.now();
+    if (now - lastTap < 320) focusAt(e.clientX, e.clientY);
+    lastTap = now;
+  });
+  function boardPoint(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const nx = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const ny = 1 - ((clientY - rect.top) / rect.height) * 2;
+    const c = camera();
+    const th = Math.tan(c.fov / 2);
+    const dir = v3.norm(v3.add(v3.scale(c.view.z, -1),
+      v3.add(v3.scale(c.view.x, nx * th * c.aspect), v3.scale(c.view.y, ny * th))));
+    if (dir[1] >= -1e-4) return null;
+    const t = -c.eye[1] / dir[1];
+    return [c.eye[0] + dir[0] * t, c.eye[2] + dir[2] * t];
+  }
+  function focusAt(clientX, clientY) {
+    const p = boardPoint(clientX, clientY);
+    if (p) glideTo(p[0], p[1]);
+  }
 
   function pick(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
@@ -1107,7 +1253,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   api.select = (pos) => { selected = pos; dirty = true; };
   /** Place the camera (theta = turn around the board, phi = tilt, r = distance). */
   api.setCamera = ({ theta = cam.theta, phi = cam.phi, r = cam.r, target = cam.target } = {}) => {
-    Object.assign(cam, { theta, phi: Math.min(Math.max(phi, 0.35), 1.5), r, target, auto: false });
+    Object.assign(cam, { theta, phi: Math.min(Math.max(phi, 0.12), 1.5), r, target, auto: false });
     dirty = true;
   };
 

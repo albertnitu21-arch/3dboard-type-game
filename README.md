@@ -18,9 +18,11 @@ automatically on devices without WebGL).
 
 **Pieces and camera:** in the lobby each player picks one of eight pieces (rubber duck, rocket,
 snowman, mushroom, robot, ice cream, cactus, UFO), shown in their colour; each piece can be taken once and they are defined
-in `public/pieces.js`. The **Follow** button switches to a third-person camera
-that rides behind whoever's turn it is; **Overview** goes back to the whole
-board. When a piece moves, the squares it will cross glow in its colour (the
+in `public/pieces.js`. The 🎥 camera menu has **Overview**, **Top-down**,
+**Follow player** (third-person, behind whoever's turn it is) and **Free cam**
+(drag to look, right/Shift-drag to move, scroll to zoom, WASD/arrows to fly, Q/E
+to turn, R/F to tilt, double-click to glide to a spot; on phones one finger
+looks, two fingers zoom and move, double-tap glides). When a piece moves, the squares it will cross glow in its colour (the
 landing square pulses) and a counter above it shows the steps left.
 
 **Trading:** anyone can press **Trade…** between moves (not only on their turn).
