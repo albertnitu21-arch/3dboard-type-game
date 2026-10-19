@@ -426,10 +426,17 @@ function drawBoardTexture(cnv, ctx) {
   g.translate(mid, mid);
   g.rotate(-Math.PI / 4);
   g.fillStyle = 'rgba(31,111,92,0.85)';
-  g.font = `900 ${1.2 * PX}px ${FONT}`;
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  g.fillText('ESTATE', 0, 0);
+  // the title in the middle of the board, sized to fit between the card piles
+  const title = ['HUNGER', 'ESTATES'];
+  let ts = 1.05;
+  g.font = `900 ${ts * PX}px ${FONT}`;
+  while (title.some((t) => g.measureText(t).width > 6.4 * PX) && ts > 0.5) {
+    ts -= 0.05;
+    g.font = `900 ${ts * PX}px ${FONT}`;
+  }
+  title.forEach((t, i) => g.fillText(t, 0, (i - 0.5) * ts * 1.02 * PX));
   for (const [dy, label, color] of [[-2.6, 'FORTUNE', '#d9822b'], [2.6, 'COMMUNITY FUND', '#8a5a2b']]) {
     g.save();
     g.translate(0, dy * PX);
