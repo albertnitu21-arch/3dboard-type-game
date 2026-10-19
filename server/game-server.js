@@ -38,6 +38,10 @@ const MIME = {
   '.ico': 'image/x-icon',
 };
 const MAX_BODY = 16 * 1024;
+// Changes with every deploy (Render sets RENDER_GIT_COMMIT). Asset URLs include it,
+// so browsers can never keep using files from an older version.
+export const VERSION = (process.env.RENDER_GIT_COMMIT || '').slice(0, 12) || Date.now().toString(36);
+const VERSIONED = /^\/v\/[A-Za-z0-9]{1,40}(?=\/)/;
 const STATUS = {
   no_such_room: 404, bad_token: 403, not_host: 403, not_your_turn: 403,
   room_full: 409, game_started: 409, server_full: 503, body_too_large: 413,
@@ -115,6 +119,8 @@ function sseStream(res) {
 }
 
 async function serveStatic(req, res, pathname) {
+  const versioned = VERSIONED.test(pathname);
+  if (versioned) pathname = pathname.replace(VERSIONED, '');
   for (const { prefix, dir, only } of STATIC_DIRS) {
     if (!pathname.startsWith(prefix)) continue;
     let rel = decodeURIComponent(pathname.slice(prefix.length));
@@ -126,10 +132,18 @@ async function serveStatic(req, res, pathname) {
     try {
       const st = await stat(file);
       if (!st.isFile()) continue;
-      const body = await readFile(file);
+      let body = await readFile(file);
+      let cache = versioned ? 'public, max-age=31536000, immutable' : 'no-cache';
+      if (ext === '.html') {
+        // Point the page at this version's files and tell it which version it is.
+        body = Buffer.from(body.toString('utf8')
+          .replace(/(href|src)="(?!https?:|\/|#)([^"]+\.(?:css|js))"/g, `$1="/v/${VERSION}/$2"`)
+          .replace('<head>', `<head>\n  <meta name="app-version" content="${VERSION}">`));
+        cache = 'no-store';
+      }
       res.writeHead(200, {
         'Content-Type': MIME[ext] ?? 'application/octet-stream',
-        'Cache-Control': 'no-cache',
+        'Cache-Control': cache,
       });
       res.end(req.method === 'HEAD' ? undefined : body);
       return true;
@@ -165,6 +179,7 @@ export function createGameServer({ botDelay = 1500, corsOrigin = process.env.COR
     if (verb === 'events' && req.method === 'GET') {
       const m = auth(room, url.searchParams.get('token'));
       const stream = sseStream(res);
+      stream.send('hello', { version: VERSION });
       room.attach(m, stream);
       req.on('close', () => { stream._stop(); room.detach(m, stream); });
       return;
@@ -229,7 +244,7 @@ export function createGameServer({ botDelay = 1500, corsOrigin = process.env.COR
       return send(res, 400, { error: 'bad_request', message: 'Bad URL.' });
     }
     try {
-      if (url.pathname === '/health') return send(res, 200, { ok: true, rooms: lobby.rooms.size });
+      if (url.pathname === '/health') return send(res, 200, { ok: true, rooms: lobby.rooms.size, version: VERSION });
       if (url.pathname.startsWith('/api/')) return await handleApi(req, res, url);
       if ((req.method === 'GET' || req.method === 'HEAD') && await serveStatic(req, res, url.pathname)) return;
       return send(res, 404, { error: 'not_found', message: 'Not found.' });

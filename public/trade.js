@@ -2,7 +2,7 @@
 // and answer incoming offers. Rules are still enforced by the server; this file
 // only builds the `propose_trade` action and shows `state.trade`.
 
-import { BOARD, GROUP_POSITIONS } from '/engine/board.js';
+import { BOARD, GROUP_POSITIONS } from './engine/board.js';
 import { el, deedCard } from './deeds.js';
 
 const JAIL_VALUE = 50;

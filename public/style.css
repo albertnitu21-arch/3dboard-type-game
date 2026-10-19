@@ -345,3 +345,9 @@ button.deed:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.5
 .board-tools button[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 
 .log:empty { display: none; }
+.update-bar {
+  position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 70;
+  display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 12px;
+  background: var(--ink); color: var(--bg); box-shadow: 0 8px 30px rgba(0,0,0,0.3); font-size: 14px;
+  max-width: calc(100vw - 32px);
+}

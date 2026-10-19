@@ -1,7 +1,7 @@
 // Web client: lobby, side panel, animation queue and the 2D fallback board.
 // The 3D board lives in board3d.js and the trade window in trade.js.
 
-import { BOARD, GROUPS, GROUP_POSITIONS, STATION_RENTS } from '/engine/board.js';
+import { BOARD, GROUPS, GROUP_POSITIONS, STATION_RENTS } from './engine/board.js';
 import { deedCard } from './deeds.js';
 import { createBoard3D } from './board3d.js';
 import { createTradeUI } from './trade.js';
@@ -106,6 +106,7 @@ function connect() {
     logLines.push({ text: `${m.name}: ${m.text}`, chat: true });
     renderLog();
   });
+  source.addEventListener('hello', (e) => checkVersion(JSON.parse(e.data).version));
   source.addEventListener('kicked', () => leaveRoom('You were removed from the room.'));
   source.addEventListener('card_closed', (e) => {
     const { seq } = JSON.parse(e.data);
@@ -134,9 +135,25 @@ addEventListener('pagehide', () => { unloading = true; });
 
 // Free hosts (e.g. Render) put the server to sleep after 15 minutes without
 // incoming requests, which would wipe the room. While you're in a room, ping it.
-setInterval(() => {
-  if (session && !document.hidden) fetch(`${API}/health`, { cache: 'no-store' }).catch(() => {});
-}, 4 * 60 * 1000);
+function ping() {
+  fetch(`${API}/health`, { cache: 'no-store' })
+    .then((r) => r.json())
+    .then((h) => checkVersion(h.version))
+    .catch(() => {});
+}
+setInterval(() => { if (session && !document.hidden) ping(); }, 4 * 60 * 1000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) ping(); });
+
+// ------------------------------------------------------ new version notice
+
+const PAGE_VERSION = document.querySelector('meta[name="app-version"]')?.content ?? null;
+function checkVersion(v) {
+  if (!PAGE_VERSION || !v || v === PAGE_VERSION || $('update-bar')) return;
+  const bar = el('div', { id: 'update-bar', class: 'update-bar', role: 'status' },
+    el('span', {}, 'A new version of the game is out.'),
+    el('button', { type: 'button', class: 'primary small', onclick: () => location.reload() }, 'Reload'));
+  document.body.append(bar);
+}
 
 // ------------------------------------------------------- 3D board + queue
 

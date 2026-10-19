@@ -1,6 +1,6 @@
 // Title-deed cards shared by the trade window and the My properties panel.
 
-import { BOARD, GROUPS, GROUP_POSITIONS, STATION_RENTS } from '/engine/board.js';
+import { BOARD, GROUPS, GROUP_POSITIONS, STATION_RENTS } from './engine/board.js';
 
 export function el(tag, attrs = {}, ...kids) {
   const n = document.createElement(tag);

@@ -2,7 +2,7 @@
 // floats up as a green "+200" or red "−60" next to the player (and over their
 // token on the 3D board).
 
-import { BOARD } from '/engine/board.js';
+import { BOARD } from './engine/board.js';
 
 const fmt = (n) => Math.round(n).toLocaleString();
 

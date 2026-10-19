@@ -321,6 +321,19 @@ test('the web client and the engine modules are served', async () => {
     assert.equal(board.status, 200);
     assert.match(board.headers.get('content-type'), /javascript/);
     assert.equal((await fetch(`${ctx.base}/engine/missing.js`)).status, 404);
+
+    // The page points at versioned files, so browsers never reuse old ones.
+    const html = await (await fetch(`${ctx.base}/`)).text();
+    const { version } = await (await fetch(`${ctx.base}/health`)).json();
+    assert.ok(version);
+    assert.ok(html.includes(`<meta name="app-version" content="${version}">`));
+    assert.ok(html.includes(`src="/v/${version}/app.js"`) && html.includes(`href="/v/${version}/style.css"`));
+    assert.equal(page.headers.get('cache-control'), 'no-store');
+    const app = await fetch(`${ctx.base}/v/${version}/app.js`);
+    assert.equal(app.status, 200);
+    assert.match(app.headers.get('cache-control'), /immutable/);
+    assert.equal((await fetch(`${ctx.base}/v/${version}/engine/board.js`)).status, 200);
+    assert.equal((await fetch(`${ctx.base}/v/${version}/../../package.json`)).status, 404);
   } finally {
     await ctx.stop();
   }
