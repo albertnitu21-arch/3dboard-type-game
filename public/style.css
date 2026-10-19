@@ -417,12 +417,47 @@ body.full .board-wrap { position: fixed; inset: 0; z-index: 20; }
 body.full .board3d { aspect-ratio: auto; height: 100%; border-radius: 0; border: 0; }
 body.full #board { position: absolute; inset: 0; margin: auto; width: min(100vw, 100vh); height: min(100vw, 100vh); }
 body.full .board-wrap .board-tools { left: 12px; right: auto; justify-content: flex-start; }
+/* compact glass panel: only as tall as its content, small type, soft cards */
 body.full .side {
-  position: fixed; z-index: 30; top: 12px; right: 12px; bottom: 76px; width: 350px;
-  overflow-y: auto; padding: 12px; border-radius: 14px;
-  background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(8px);
-  border: 1px solid var(--line); box-shadow: 0 12px 40px rgba(0,0,0,0.2);
+  position: fixed; z-index: 30; top: 12px; right: 12px; bottom: auto; width: 272px;
+  max-height: calc(100vh - 84px); max-height: calc(100dvh - 84px);
+  overflow-y: auto; padding: 10px; gap: 7px; border-radius: 16px; font-size: 13px;
+  --glass: color-mix(in srgb, var(--panel) 62%, transparent);
+  --glass-line: color-mix(in srgb, var(--ink) 9%, transparent);
+  background: color-mix(in srgb, var(--bg) 58%, transparent);
+  backdrop-filter: blur(14px) saturate(1.3); -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  border: 1px solid var(--glass-line); box-shadow: 0 8px 28px rgba(0,0,0,0.18);
+  scrollbar-width: thin; animation: panel-in 0.25s ease-out;
 }
+@keyframes panel-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { body.full .side { animation: none; } }
+@media (min-width: 761px) { body.full #game .side { padding-bottom: 10px; } }
+body.full .side .actions:empty { display: none; }
+body.full .side .status { font-size: 14px; padding: 0 2px; }
+body.full .side .actions { gap: 6px; }
+body.full .side .actions button { padding: 6px 12px; font-size: 13px; border-radius: 999px; }
+body.full .side .players { gap: 4px; }
+body.full .side .players li,
+body.full .side details,
+body.full .side .trade-banner,
+body.full .side .log,
+body.full .side .space-info {
+  background: var(--glass); border: 1px solid var(--glass-line); border-radius: 10px;
+}
+body.full .side .players li { padding: 5px 9px; gap: 6px; }
+body.full .side .players li.turn { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+body.full .side .dot { width: 9px; height: 9px; }
+body.full .side details { padding: 6px 9px; }
+body.full .side #manage > summary { margin-bottom: 0; font-size: 13px; }
+body.full .side #manage[open] > summary { margin-bottom: 4px; }
+body.full .side .tag { font-size: 11px; }
+body.full .side .trade-banner { padding: 5px 6px 5px 9px; font-size: 12px; }
+body.full .side .trade-banner button { padding: 3px 10px; font-size: 12px; border-radius: 999px; }
+body.full .side .log { max-height: 120px; font-size: 12px; padding: 6px 9px; }
+body.full .side #chat-form { gap: 6px; flex-wrap: nowrap; }
+body.full .side #chat-form input { padding: 5px 10px; font-size: 12px; border-radius: 999px; background: var(--glass); border-color: var(--glass-line); }
+body.full .side #chat-form button { padding: 5px 12px; font-size: 12px; border-radius: 999px; }
+body.full .side .error:empty { display: none; }
 body.full.panel-hidden .side { display: none; }
 @media (max-width: 760px) {
   /* phones: board on top, panel as a sheet underneath */
