@@ -39,8 +39,10 @@ a pop-up with who drew it and what it says.
 **Fullscreen and backgrounds:** **⛶ Fullscreen** makes the board fill the whole
 window (and hides the browser bars where the browser allows); the side panel
 floats on top and can be hidden. The 🎨 menu picks the table the board sits on:
-Classic, Picnic, Meadow, Starry night, Candy, Wooden table or Beach (drawn in
-`public/backgrounds.js`). Both choices are per device.
+Classic, Picnic, Meadow, Starry night, Candy, Living room (a real wooden table
+with a rug, sofa, window, lamp and bookshelf; the wall nearest the camera is cut
+away) or Beach (sea, umbrella, towel, sandcastle, palm tree, beach ball). Drawn in
+`public/backgrounds.js` and `public/board3d.js`. Both choices are per device.
 
 **Leaving and restarting:** **Leave game** hands your seat to a bot and takes
 you back to the start page so you can create or join another room. The host

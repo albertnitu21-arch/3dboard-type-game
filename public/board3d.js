@@ -10,7 +10,7 @@
 // viewed by default from +z. Space 0 (Start) is the near-right corner.
 
 import { pieceFor } from './pieces.js';
-import { bgByKey, drawTableTile } from './backgrounds.js';
+import { bgByKey, drawTableTile, SCENE_TEXTURES } from './backgrounds.js';
 import { sfx } from './sounds.js';
 
 const MONEY_EVENTS = new Set(['pay', 'pass_start', 'gain', 'bought', 'auction_won', 'built', 'sold_building', 'mortgaged', 'unmortgaged', 'trade_done']);
@@ -665,6 +665,8 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   const TABLE = 90;
   let background = bgByKey('classic');
   const tableTex = texture(drawTableTile(background), true);
+  const sceneTex = {};
+  const stex = (name) => (sceneTex[name] ??= texture(SCENE_TEXTURES[name](), true));
   const GLOW_PAD = 0.14; // world units the glow spills past the square
   const glowEdgeTex = texture(glowTexture(256, 512, [GLOW_PAD / (W + 2 * GLOW_PAD), GLOW_PAD / (C + 2 * GLOW_PAD)]));
   const glowCornerTex = texture(glowTexture(512, 512, [GLOW_PAD / (C + 2 * GLOW_PAD), GLOW_PAD / (C + 2 * GLOW_PAD)]));
@@ -673,6 +675,11 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     plane: mesh(planeGeo()),
     table: mesh((() => { const g = planeGeo(); g.uv = g.uv.map((v) => v * (TABLE / 6)); return g; })()),
     roof: mesh(roofGeo()),
+    // scenery pieces with tiled texture coordinates
+    tabletop: mesh(boxGeo(1, 1, 1, [[0, 0, 2.7, 0.06], [0, 0, 2.7, 0.06], [0, 0, 2.7, 2.7], [0, 0, 2.7, 2.7], [0, 0, 2.7, 0.06], [0, 0, 2.7, 0.06]])),
+    floor: mesh((() => { const g = planeGeo(); g.uv = g.uv.map((v) => v * 7); return g; })()),
+    wall: mesh(boxGeo(1, 1, 1, Array(6).fill([0, 0, 7, 2.3]))),
+    sea: mesh((() => { const g = planeGeo(); g.uv = g.uv.map((v, i) => v * (i % 2 ? 8 : 14)); return g; })()),
     // unit shapes for the player pieces (see pieces.js)
     sphere: mesh(latheGeo(Array.from({ length: 13 }, (_, i) => {
       const a = -Math.PI / 2 + (i / 12) * Math.PI;
@@ -880,6 +887,144 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     return out;
   }
 
+  // ----- scenery around the board (depends on the chosen background)
+  const yaw = (a) => quat.axis([0, 1, 0], a);
+  const prop = (m, at, sc, color, tex = null, q = undefined, opts) => draw(M[m], trs(at, q, sc), typeof color === 'string' ? hexToRgb(color) : color, tex, opts);
+
+  function drawBackdrop(c) {
+    if (background.scene === 'livingroom') return drawLivingRoom(c);
+    // an endless table that fades into the sky
+    gl.enable(gl.BLEND);
+    gl.uniform2f(U.uFade, 16, 34);
+    draw(M.table, trs([0, -0.31, 0], undefined, [TABLE, 1, TABLE]), [1, 1, 1], tableTex, { lit: false });
+    gl.uniform2f(U.uFade, 0, 0);
+    gl.disable(gl.BLEND);
+    if (background.scene === 'beach') drawBeach();
+  }
+
+  function drawLivingRoom(c) {
+    const F = -3.6; // floor height
+    const R = 15;   // half size of the room
+    // wooden table under the board
+    prop('tabletop', [0, -0.5, 0], [16, 0.38, 16], [1, 1, 1], tableTex, undefined, { spec: 0.15 });
+    for (const [x, z] of [[-7, -7], [7, -7], [-7, 7], [7, 7]]) {
+      prop('box', [x, (F - 0.69) / 2, z], [0.7, -0.69 - F, 0.7], '#7a4a26', null, undefined, { spec: 0.1 });
+    }
+    prop('box', [0, -0.85, 7.6], [14, 0.35, 0.3], '#8a5530'); // apron
+    prop('box', [0, -0.85, -7.6], [14, 0.35, 0.3], '#8a5530');
+    // floor and rug
+    draw(M.floor, trs([0, F, 0], undefined, [R * 2, 1, R * 2]), [1, 1, 1], stex('parquet'), { lit: false });
+    prop('box', [0, F + 0.02, 0], [21, 0.04, 17], [1, 1, 1], stex('rug'));
+    // walls: only the ones behind the scene are drawn, so you look in like a dollhouse
+    const walls = [
+      { at: [0, F + 4.5, -R], sc: [R * 2, 9, 0.3], show: c.eye[2] > -R },
+      { at: [0, F + 4.5, R], sc: [R * 2, 9, 0.3], show: c.eye[2] < R },
+      { at: [-R, F + 4.5, 0], sc: [0.3, 9, R * 2], show: c.eye[0] > -R },
+      { at: [R, F + 4.5, 0], sc: [0.3, 9, R * 2], show: c.eye[0] < R },
+    ];
+    // a wall is drawn only when the camera is on the room side of it
+    for (const w of walls) {
+      if (!w.show) continue;
+      prop('wall', w.at, w.sc, [1, 1, 1], stex('wallpaper'));
+      const inward = Math.sign(-(w.at[0] || w.at[2]));
+      const skirt = w.sc[0] > 1 ? [w.at[0], F + 0.25, w.at[2] + inward * 0.25] : [w.at[0] + inward * 0.25, F + 0.25, w.at[2]];
+      prop('box', skirt, w.sc[0] > 1 ? [R * 2, 0.5, 0.2] : [0.2, 0.5, R * 2], '#f7f1e6');
+    }
+    // window on the left wall
+    if (c.eye[0] > -R) {
+      prop('box', [-R + 0.2, F + 5, -3], [0.15, 4.2, 5.6], '#ffffff');
+      prop('box', [-R + 0.3, F + 5, -3], [0.1, 3.8, 5.2], '#bfe6ff', null, undefined, { lit: false });
+      prop('box', [-R + 0.38, F + 5, -3], [0.06, 3.8, 0.15], '#ffffff');
+      prop('box', [-R + 0.38, F + 5, -3], [0.06, 0.15, 5.2], '#ffffff');
+      prop('box', [-R + 0.5, F + 7.3, -3], [0.3, 0.25, 6.6], '#c9a46a'); // curtain rail
+      prop('box', [-R + 0.5, F + 4.9, -6.6], [0.25, 4.6, 1.2], '#d95f5f');
+      prop('box', [-R + 0.5, F + 4.9, 0.6], [0.25, 4.6, 1.2], '#d95f5f');
+    }
+    // sofa against the back wall
+    if (c.eye[2] > -R) {
+      const sz = -R + 1.6;
+      prop('box', [0, F + 0.9, sz], [8, 1.2, 2.6], '#3e8f8a', null, undefined, { spec: 0.1 });
+      prop('box', [0, F + 2.2, sz - 1.0], [8, 1.8, 0.7], '#357f7a');
+      prop('box', [-4.2, F + 1.6, sz], [0.6, 1.6, 2.6], '#2f716d');
+      prop('box', [4.2, F + 1.6, sz], [0.6, 1.6, 2.6], '#2f716d');
+      prop('box', [-2.4, F + 2.3, sz - 0.4], [1.3, 1.1, 0.5], '#f2c14e', null, yaw(0.15));
+      prop('box', [2.3, F + 2.3, sz - 0.4], [1.3, 1.1, 0.5], '#ff8fa3', null, yaw(-0.2));
+      // picture above the sofa
+      prop('box', [0, F + 6, -R + 0.25], [4.2, 2.8, 0.15], '#6b4423');
+      prop('box', [0, F + 6, -R + 0.33], [3.7, 2.3, 0.05], '#8ec5e8', null, undefined, { lit: false });
+      prop('half', [-0.6, F + 5, -R + 0.36], [2.4, 1.0, 0.05], '#4f9f45');
+      prop('sphere', [1.0, F + 6.6, -R + 0.37], [0.6, 0.6, 0.05], '#ffd84d', null, undefined, { lit: false });
+    }
+    // floor lamp, plant and bookshelf
+    prop('cyl', [10.5, F, -11], [0.9, 0.1, 0.9], '#3a3a3a');
+    prop('cyl', [10.5, F, -11], [0.12, 6.2, 0.12], '#3a3a3a');
+    prop('cone', [10.5, F + 5.6, -11], [2.0, 1.4, 2.0], '#fff1c9', null, undefined, { lit: false });
+    prop('cyl', [-11, F, -11], [1.6, 1.4, 1.6], '#c8693d');
+    for (const [x, y, z, s] of [[-11, 2.1, -11, 1.6], [-11.6, 2.8, -10.6, 1.2], [-10.4, 2.9, -11.4, 1.2], [-11, 3.5, -11, 1.0]]) {
+      prop('sphere', [x, F + y, z], [s, s * 1.2, s], '#3f8f3a', null, undefined, { spec: 0.2 });
+    }
+    if (c.eye[0] < R) {
+      const bx = R - 0.9;
+      prop('box', [bx, F + 3, 6], [1.4, 6, 5], '#8a5530');
+      const books = ['#d94f4f', '#3a86ff', '#f2c14e', '#2ec4b6', '#9b5de5', '#f28482'];
+      for (let shelf = 0; shelf < 3; shelf++) {
+        const y = F + 1.4 + shelf * 1.8;
+        prop('box', [bx - 0.1, y - 0.65, 6], [1.3, 0.12, 4.7], '#6e4224');
+        for (let b = 0; b < 8; b++) {
+          prop('box', [bx - 0.15, y, 4.0 + b * 0.55], [1.0, 1.1 - (b % 3) * 0.15, 0.4], books[(b + shelf) % books.length]);
+        }
+      }
+    }
+  }
+
+  function drawBeach() {
+    // sea and a foamy shoreline behind the board
+    gl.enable(gl.BLEND);
+    gl.uniform2f(U.uFade, 30, 80);
+    draw(M.sea, trs([0, -0.3, -58], undefined, [180, 1, 84]), [1, 1, 1], stex('water'), { lit: false });
+    gl.uniform2f(U.uFade, 0, 0);
+    draw(M.plane, trs([0, -0.298, -16.2], undefined, [180, 1, 0.9]), [1, 1, 1, 0.75], null, { lit: false });
+    gl.disable(gl.BLEND);
+    // umbrella with a towel underneath
+    const tilt = quat.axis([1, 0, 1], 0.12);
+    prop('cyl', [9.6, -0.31, -7.5], [0.16, 4.6, 0.16], '#f4f1e8', null, tilt);
+    prop('cone', [9.35, 3.6, -7.75], [6.4, 1.4, 6.4], [1, 1, 1], stex('stripes'), tilt, { spec: 0.1 });
+    prop('sphere', [9.3, 5.0, -7.8], [0.3, 0.3, 0.3], '#e8473f');
+    prop('box', [9.0, -0.29, -5.6], [3.2, 0.04, 5.4], [1, 1, 1], stex('towel'), yaw(0.35));
+    // beach ball
+    prop('sphere', [-8.6, 0.25, 7.2], [1.15, 1.15, 1.15], [1, 1, 1], stex('ball'), quat.axis([1, 0, 0.4], 0.6), { spec: 0.6 });
+    // bucket and spade
+    prop('cyl', [8.8, -0.31, 8.2], [1.0, 0.9, 1.0], '#3a86ff', null, undefined, { spec: 0.4 });
+    prop('cyl', [8.8, 0.58, 8.2], [1.06, 0.06, 1.06], '#2a6fd6');
+    prop('torus', [8.8, 0.62, 8.2], [1.0, 0.6, 1.0], '#ffd23a', null, quat.axis([1, 0, 0], Math.PI / 2));
+    prop('box', [7.6, -0.25, 8.9], [0.18, 0.08, 1.6], '#e8473f', null, yaw(0.7));
+    prop('box', [7.1, -0.25, 9.5], [0.5, 0.06, 0.6], '#e8473f', null, yaw(0.7));
+    // sandcastle
+    const sand = '#e7c98f';
+    prop('cyl', [-9, -0.31, -7], [3.2, 0.8, 3.2], sand);
+    for (const [dx, dz] of [[-1.1, -1.1], [1.1, -1.1], [-1.1, 1.1], [1.1, 1.1]]) {
+      prop('cyl', [-9 + dx, 0.49, -7 + dz], [0.9, 0.9, 0.9], sand);
+      prop('cone', [-9 + dx, 1.39, -7 + dz], [1.0, 0.6, 1.0], '#dcb879');
+    }
+    prop('cyl', [-9, 0.49, -7], [1.3, 1.6, 1.3], sand);
+    prop('cone', [-9, 2.09, -7], [1.4, 0.9, 1.4], '#dcb879');
+    prop('cyl', [-9, 2.9, -7], [0.05, 1.0, 0.05], '#6b4423');
+    prop('box', [-8.75, 3.7, -7], [0.5, 0.3, 0.03], '#e8473f');
+    // palm tree
+    let px = -11.5, py = -0.31, pz = 9.5;
+    for (let i = 0; i < 7; i++) {
+      prop('cyl', [px, py, pz], [0.55 - i * 0.03, 0.75, 0.55 - i * 0.03], i % 2 ? '#a27b4f' : '#8c6a42', null, quat.axis([0, 0, 1], -0.08 * i));
+      px += 0.06 * i; py += 0.72;
+    }
+    for (let k = 0; k < 7; k++) {
+      const a = (k / 7) * Math.PI * 2;
+      const q = quat.mul(yaw(a), quat.axis([1, 0, 0], 0.55));
+      prop('sphere', [px + Math.sin(a) * 1.3, py + 0.1, pz + Math.cos(a) * 1.3], [0.7, 0.18, 2.8], '#3f9a45', null, q, { spec: 0.2 });
+    }
+    prop('sphere', [px + 0.25, py - 0.25, pz], [0.38, 0.38, 0.38], '#6b4423');
+    prop('sphere', [px - 0.2, py - 0.3, pz + 0.2], [0.38, 0.38, 0.38], '#6b4423');
+  }
+
   function render() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const w = Math.round(canvas.clientWidth * dpr), h = Math.round(canvas.clientHeight * dpr);
@@ -894,12 +1039,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     gl.disable(gl.BLEND);
     gl.depthMask(true);
 
-    // table: fades out towards the horizon into the sky
-    gl.enable(gl.BLEND);
-    gl.uniform2f(U.uFade, 16, 34);
-    draw(M.table, trs([0, -0.31, 0], undefined, [TABLE, 1, TABLE]), [1, 1, 1], tableTex, { lit: false });
-    gl.uniform2f(U.uFade, 0, 0);
-    gl.disable(gl.BLEND);
+    drawBackdrop(c);
     draw(M.slab, trs([0, -0.15, 0]), [0.16, 0.2, 0.17]);
     draw(M.plane, trs([0, 0.001, 0], undefined, [L, 1, L]), [1, 1, 1], boardTex);
 
