@@ -86,7 +86,8 @@ summary { cursor: pointer; font-weight: 600; }
 #trade-form fieldset label { flex-direction: row; font-weight: 400; align-items: center; gap: 6px; }
 .log { list-style: none; margin: 0; padding: 8px 10px; max-height: 220px; overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; font-size: 13px; }
 .log li { padding: 2px 0; }
-.log li.chat { color: var(--accent); }
+.log li.chat { color: var(--ink); overflow-wrap: anywhere; }
+.log li.chat b { color: var(--accent); }
 
 .board-wrap { position: relative; min-width: 0; }
 .board3d { position: relative; width: 100%; aspect-ratio: 4 / 3.4; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); }

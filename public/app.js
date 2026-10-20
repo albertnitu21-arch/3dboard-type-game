@@ -20,7 +20,8 @@ let session = null; // { code, id, token }
 let source = null;
 let lobby = null;
 let game = null; // { state, legal }
-const logLines = [];
+const logLines = []; // chat messages only
+let lastEvent = ''; // the latest game event, shown in the middle of the flat 2D board
 
 // ---------------------------------------------------------------- storage
 
@@ -91,6 +92,7 @@ function resetGameView() {
   game = null;
   queue.length = 0;
   logLines.length = 0;
+  lastEvent = '';
   selectedSpace = null;
   tradeUI.close();
   closeCard?.();
@@ -112,6 +114,7 @@ function leaveRoom(message = '') {
   closeCard?.();
   money.reset();
   logLines.length = 0;
+  lastEvent = '';
   store.clear();
   history.replaceState(null, '', location.pathname);
   show('home');
@@ -129,7 +132,7 @@ function connect() {
   source.addEventListener('state', (e) => enqueue(JSON.parse(e.data)));
   source.addEventListener('chat', (e) => {
     const m = JSON.parse(e.data);
-    logLines.push({ text: `${m.name}: ${m.text}`, chat: true });
+    logLines.push({ name: m.name, text: m.text, chat: true });
     renderLog();
   });
   source.addEventListener('hello', (e) => checkVersion(JSON.parse(e.data).version));
@@ -317,7 +320,7 @@ async function drain() {
     }
     for (const ev of d.events) {
       const line = describe(ev);
-      if (line) logLines.push({ text: line });
+      if (line) lastEvent = line; // game events are not listed in the chat
     }
     render();
     money.reconcile();
@@ -519,7 +522,7 @@ function gridArea(pos) {
 
 function renderBoard() {
   const { state } = game;
-  const last = [...logLinesEvents()].pop();
+  const last = lastEvent || null;
   const cells = BOARD.map((space) => {
     const [r, c] = gridArea(space.pos);
     const prop = state.props[space.pos];
@@ -546,9 +549,6 @@ function renderBoard() {
   $('board').replaceChildren(...cells, center);
 }
 
-function* logLinesEvents() {
-  for (const l of logLines.slice(-1)) if (!l.chat) yield l.text;
-}
 
 function tooltip(space) {
   if (space.type === 'property') {
@@ -765,7 +765,7 @@ function renderMine() {
 function renderLog() {
   const list = $('log');
   const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 30;
-  list.replaceChildren(...logLines.slice(-150).map((l) => el('li', { class: l.chat ? 'chat' : '' }, l.text)));
+  list.replaceChildren(...logLines.slice(-150).map((l) => el('li', { class: 'chat' }, el('b', {}, `${l.name}: `), l.text)));
   if (atBottom) list.scrollTop = list.scrollHeight;
 }
 
