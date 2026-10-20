@@ -10,8 +10,12 @@
 // viewed by default from +z. Space 0 (Start) is the near-right corner.
 
 import { pieceFor } from './pieces.js';
-import { bgByKey, drawTableTile, SCENE_TEXTURES } from './backgrounds.js';
+import { bgByKey, drawTableTile } from './backgrounds.js';
 import { sfx } from './sounds.js';
+import { v3, quat, trs, mul4, perspective, ortho, lookAt, lerp, easeOut, easeInOut, hexToRgb, normalMat } from './math3d.js';
+import { boxGeo, latheGeo, roofGeo, planeGeo, sphereGeo, cylGeo, coneGeo, torusGeo, rboxGeo, discGeo } from './geometry.js';
+import { TEXTURES } from './textures.js';
+import { SCENES, DEFAULT_LIGHT } from './scenes.js';
 
 const MONEY_EVENTS = new Set(['pay', 'pass_start', 'gain', 'bought', 'auction_won', 'built', 'sold_building', 'mortgaged', 'unmortgaged', 'trade_done']);
 
@@ -22,157 +26,6 @@ const BAND = 0.26;     // colour band depth
 const TEX = 2048;      // board texture size (px)
 const PX = TEX / L;    // px per unit
 const DIE = 0.62;      // die edge length
-
-// ---------------------------------------------------------------- math
-
-const v3 = {
-  sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]],
-  add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]],
-  scale: (a, s) => [a[0] * s, a[1] * s, a[2] * s],
-  dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
-  cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
-  norm: (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; },
-};
-
-const quat = {
-  id: () => [0, 0, 0, 1],
-  axis(ax, ang) {
-    const [x, y, z] = v3.norm(ax);
-    const s = Math.sin(ang / 2);
-    return [x * s, y * s, z * s, Math.cos(ang / 2)];
-  },
-  mul(a, b) {
-    return [
-      a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
-      a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
-      a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
-      a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
-    ];
-  },
-};
-
-/** Column-major model matrix from translation, rotation quaternion and scale. */
-function trs(t = [0, 0, 0], q = [0, 0, 0, 1], s = [1, 1, 1]) {
-  const [x, y, z, w] = q;
-  const sc = typeof s === 'number' ? [s, s, s] : s;
-  return [
-    (1 - 2 * (y * y + z * z)) * sc[0], 2 * (x * y + z * w) * sc[0], 2 * (x * z - y * w) * sc[0], 0,
-    2 * (x * y - z * w) * sc[1], (1 - 2 * (x * x + z * z)) * sc[1], 2 * (y * z + x * w) * sc[1], 0,
-    2 * (x * z + y * w) * sc[2], 2 * (y * z - x * w) * sc[2], (1 - 2 * (x * x + y * y)) * sc[2], 0,
-    t[0], t[1], t[2], 1,
-  ];
-}
-function mul4(a, b) {
-  const o = new Array(16);
-  for (let c = 0; c < 4; c++) {
-    for (let r = 0; r < 4; r++) {
-      let s = 0;
-      for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
-      o[c * 4 + r] = s;
-    }
-  }
-  return o;
-}
-function perspective(fovy, aspect, near, far) {
-  const f = 1 / Math.tan(fovy / 2);
-  const nf = 1 / (near - far);
-  return [f / aspect, 0, 0, 0, 0, f, 0, 0, 0, 0, (far + near) * nf, -1, 0, 0, 2 * far * near * nf, 0];
-}
-function lookAt(eye, target, up = [0, 1, 0]) {
-  const z = v3.norm(v3.sub(eye, target));
-  const x = v3.norm(v3.cross(up, z));
-  const y = v3.cross(z, x);
-  return {
-    m: [x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0,
-      -v3.dot(x, eye), -v3.dot(y, eye), -v3.dot(z, eye), 1],
-    x, y, z,
-  };
-}
-const lerp = (a, b, t) => a + (b - a) * t;
-const easeOut = (t) => 1 - (1 - t) ** 3;
-const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
-
-// ------------------------------------------------------------ geometry
-
-function boxGeo(w, h, d, uvRects) {
-  const hx = w / 2, hy = h / 2, hz = d / 2;
-  const faces = [
-    { n: [1, 0, 0], u: [0, 0, -1], v: [0, -1, 0] },
-    { n: [-1, 0, 0], u: [0, 0, 1], v: [0, -1, 0] },
-    { n: [0, 1, 0], u: [1, 0, 0], v: [0, 0, 1] },
-    { n: [0, -1, 0], u: [1, 0, 0], v: [0, 0, -1] },
-    { n: [0, 0, 1], u: [1, 0, 0], v: [0, -1, 0] },
-    { n: [0, 0, -1], u: [-1, 0, 0], v: [0, -1, 0] },
-  ];
-  const ext = (a) => Math.abs(a[0]) * hx + Math.abs(a[1]) * hy + Math.abs(a[2]) * hz;
-  const pos = [], nor = [], uv = [], idx = [];
-  faces.forEach((f, fi) => {
-    const c = v3.scale(f.n, ext(f.n));
-    const hu = ext(f.u), hv = ext(f.v);
-    const [u0, v0, u1, v1] = uvRects?.[fi] ?? [0, 0, 1, 1];
-    const base = pos.length / 3;
-    for (const [s, t] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
-      const p = v3.add(c, v3.add(v3.scale(f.u, s * hu), v3.scale(f.v, t * hv)));
-      pos.push(...p);
-      nor.push(...f.n);
-      uv.push(lerp(u0, u1, (s + 1) / 2), lerp(v0, v1, (t + 1) / 2));
-    }
-    idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
-  });
-  return { pos, nor, uv, idx };
-}
-
-/** Surface of revolution from a [radius, height] profile (bottom to top). */
-function latheGeo(profile, seg = 24) {
-  const pos = [], nor = [], uv = [], idx = [];
-  const n = profile.length;
-  const pn = profile.map((p, k) => {
-    const a = profile[Math.max(k - 1, 0)], b = profile[Math.min(k + 1, n - 1)];
-    const t = [b[0] - a[0], b[1] - a[1]];
-    const l = Math.hypot(t[0], t[1]) || 1;
-    return [t[1] / l, -t[0] / l];
-  });
-  for (let i = 0; i <= seg; i++) {
-    const ang = (i / seg) * Math.PI * 2;
-    const c = Math.cos(ang), s = Math.sin(ang);
-    profile.forEach(([r, y], k) => {
-      pos.push(r * c, y, r * s);
-      nor.push(pn[k][0] * c, pn[k][1], pn[k][0] * s);
-      uv.push(i / seg, k / (n - 1));
-    });
-  }
-  for (let i = 0; i < seg; i++) {
-    for (let k = 0; k < n - 1; k++) {
-      const a = i * n + k, b = (i + 1) * n + k;
-      idx.push(a, b, a + 1, b, b + 1, a + 1);
-    }
-  }
-  return { pos, nor, uv, idx };
-}
-
-/** Unit triangular prism: base 1 x 1 at y = 0, ridge along x at y = 1 (a roof). */
-function roofGeo() {
-  const k = Math.hypot(0.5, 1);
-  const fn = [0, 0.5 / k, 1 / k], bn = [0, 0.5 / k, -1 / k];
-  const pos = [
-    -0.5, 0, 0.5, 0.5, 0, 0.5, 0.5, 1, 0, -0.5, 1, 0,      // front slope
-    0.5, 0, -0.5, -0.5, 0, -0.5, -0.5, 1, 0, 0.5, 1, 0,    // back slope
-    0.5, 0, 0.5, 0.5, 0, -0.5, 0.5, 1, 0,                  // right gable
-    -0.5, 0, -0.5, -0.5, 0, 0.5, -0.5, 1, 0,               // left gable
-  ];
-  const nor = [...fn, ...fn, ...fn, ...fn, ...bn, ...bn, ...bn, ...bn, 1, 0, 0, 1, 0, 0, 1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0];
-  const uv = new Array((pos.length / 3) * 2).fill(0);
-  return { pos, nor, uv, idx: [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7, 8, 9, 10, 11, 12, 13] };
-}
-
-function planeGeo() {
-  return {
-    pos: [-0.5, 0, -0.5, 0.5, 0, -0.5, 0.5, 0, 0.5, -0.5, 0, 0.5],
-    nor: [0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0],
-    uv: [0, 0, 1, 0, 1, 1, 0, 1],
-    idx: [0, 1, 2, 0, 2, 3],
-  };
-}
 
 function pawnProfile() {
   const p = [[0, 0], [0.15, 0], [0.155, 0.03], [0.14, 0.06], [0.1, 0.09], [0.075, 0.16],
@@ -561,39 +414,103 @@ function radialTexture(inner, outer, ring = false) {
 // ------------------------------------------------------------- webgl
 
 const VS = `
-attribute vec3 aPos; attribute vec3 aNor; attribute vec2 aUv;
-uniform mat4 uVP; uniform mat4 uModel;
-varying vec3 vN; varying vec2 vUv; varying vec3 vW;
+attribute vec3 aPos; attribute vec3 aNor; attribute vec2 aUv; attribute vec3 aCol;
+uniform mat4 uVP; uniform mat4 uModel; uniform mat3 uNormal; uniform mat4 uLVP; uniform float uShadowOn;
+varying vec3 vN; varying vec2 vUv; varying vec3 vW; varying vec3 vCol; varying vec4 vL;
 void main() {
   vec4 w = uModel * vec4(aPos, 1.0);
   vW = w.xyz;
-  vN = (uModel * vec4(aNor, 0.0)).xyz;
+  vN = uNormal * aNor;
   vUv = aUv;
+  vCol = aCol;
+  // shadow lookup position, nudged along the normal so surfaces don't shadow themselves
+  vL = uShadowOn > 0.5 ? uLVP * vec4(w.xyz + normalize(vN) * 0.04, 1.0) : vec4(0.0);
   gl_Position = uVP * w;
 }`;
 const FS = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
 precision mediump float;
-varying vec3 vN; varying vec2 vUv; varying vec3 vW;
+#endif
+varying vec3 vN; varying vec2 vUv; varying vec3 vW; varying vec3 vCol; varying vec4 vL;
 uniform sampler2D uTex; uniform float uUseTex; uniform vec4 uColor;
 uniform float uLit; uniform float uSpec; uniform vec3 uLight; uniform vec3 uEye; uniform vec2 uFade;
+uniform vec3 uSky; uniform vec3 uGround; uniform vec3 uSun;
+uniform vec3 uPointPos; uniform vec3 uPointCol; uniform float uPointRange;
+uniform sampler2D uShadow; uniform float uShadowOn; uniform float uTexel; uniform float uBias;
+uniform vec3 uFogCol; uniform vec2 uFog; uniform float uAlphaTest; uniform float uEmit;
+float unpack(vec4 c) { return dot(c, vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0)); }
+float shadowAt(vec3 p, float ndl) {
+  float bias = uBias * (1.0 + 3.0 * (1.0 - ndl));
+  if (p.x <= 0.0 || p.x >= 1.0 || p.y <= 0.0 || p.y >= 1.0 || p.z >= 1.0) return 1.0;
+  float s = 0.0;
+  for (int i = -1; i <= 1; i++) {
+    for (int j = -1; j <= 1; j++) {
+      float d = unpack(texture2D(uShadow, p.xy + vec2(float(i), float(j)) * uTexel));
+      s += p.z - bias > d ? 0.0 : 1.0;
+    }
+  }
+  return s / 9.0;
+}
 void main() {
-  vec4 c = uColor;
+  vec4 c = uColor * vec4(vCol, 1.0);
   if (uUseTex > 0.5) c *= texture2D(uTex, vUv);
+  if (c.a < uAlphaTest) discard;
   if (uFade.y > 0.0) c.a *= 1.0 - smoothstep(uFade.x, uFade.y, length(vW.xz));
   if (uLit > 0.5) {
     vec3 n = normalize(vN);
+    vec3 v = normalize(uEye - vW);
+    if (dot(n, v) < -0.05) n = -n; // thin things (leaves, curtains) are lit on both sides
     float d = max(dot(n, uLight), 0.0);
-    vec3 h = normalize(uLight + normalize(uEye - vW));
-    float s = pow(max(dot(n, h), 0.0), 40.0) * uSpec;
-    c.rgb = c.rgb * (0.56 + 0.52 * d) + vec3(s);
+    float sh = 1.0;
+    if (uShadowOn > 0.5 && d > 0.0) sh = shadowAt(vL.xyz / vL.w * 0.5 + 0.5, d);
+    vec3 light = mix(uGround, uSky, n.y * 0.5 + 0.5) + uSun * d * sh;
+    if (uPointRange > 0.0) {
+      vec3 L = uPointPos - vW;
+      float dist = length(L);
+      float att = clamp(1.0 - dist / uPointRange, 0.0, 1.0);
+      light += uPointCol * att * att * (0.35 + 0.65 * max(dot(n, L / dist), 0.0));
+    }
+    vec3 h = normalize(uLight + v);
+    float spec = pow(max(dot(n, h), 0.0), 48.0) * uSpec * sh;
+    c.rgb = c.rgb * light + spec * uSun * 1.9;
   }
+  c.rgb *= 1.0 + uEmit;
+  if (uFog.y > 0.0) c.rgb = mix(c.rgb, uFogCol, smoothstep(uFog.x, uFog.y, length(vW - uEye)) * 0.85);
   gl_FragColor = c;
 }`;
+// depth from the sun's point of view, packed into a colour texture
+const SVS = `
+attribute vec3 aPos; attribute vec2 aUv;
+uniform mat4 uLVP; uniform mat4 uModel;
+varying float vD; varying vec2 vUv;
+void main() {
+  vec4 p = uLVP * uModel * vec4(aPos, 1.0);
+  vD = p.z / p.w * 0.5 + 0.5;
+  vUv = aUv;
+  gl_Position = p;
+}`;
+const SFS = `
+precision highp float;
+varying float vD; varying vec2 vUv;
+uniform sampler2D uTex; uniform float uAlphaTest;
+void main() {
+  if (uAlphaTest > 0.0 && texture2D(uTex, vUv).a < uAlphaTest) discard;
+  vec4 e = fract(vD * vec4(1.0, 255.0, 65025.0, 16581375.0));
+  e -= e.yzww * vec4(1.0 / 255.0, 1.0 / 255.0, 1.0 / 255.0, 0.0);
+  gl_FragColor = e;
+}`;
 
-function hexToRgb(hex) {
-  const h = hex.replace('#', '');
-  const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16);
-  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+const isPOT = (n) => (n & (n - 1)) === 0;
+/** WebGL 1 can only repeat and mipmap power-of-two textures: resize others. */
+function toPOT(cnv) {
+  if (isPOT(cnv.width) && isPOT(cnv.height)) return cnv;
+  const up = (n) => 2 ** Math.round(Math.log2(n));
+  const c = document.createElement('canvas');
+  c.width = Math.min(2048, up(cnv.width)); c.height = Math.min(2048, up(cnv.height));
+  c.getContext('2d').drawImage(cnv, 0, 0, c.width, c.height);
+  return c;
 }
 
 export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf = pieceFor }) {
@@ -608,18 +525,61 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));
     return sh;
   };
-  const prog = gl.createProgram();
-  gl.attachShader(prog, compile(gl.VERTEX_SHADER, VS));
-  gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FS));
-  gl.linkProgram(prog);
-  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  const link = (vs, fs, attribs) => {
+    const pr = gl.createProgram();
+    gl.attachShader(pr, compile(gl.VERTEX_SHADER, vs));
+    gl.attachShader(pr, compile(gl.FRAGMENT_SHADER, fs));
+    attribs.forEach((name, i) => { if (name) gl.bindAttribLocation(pr, i, name); });
+    gl.linkProgram(pr);
+    if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr));
+    return pr;
+  };
+  const A = { pos: 0, nor: 1, uv: 2, col: 3 };
+  const prog = link(VS, FS, ['aPos', 'aNor', 'aUv', 'aCol']);
   gl.useProgram(prog);
-  const A = { pos: gl.getAttribLocation(prog, 'aPos'), nor: gl.getAttribLocation(prog, 'aNor'), uv: gl.getAttribLocation(prog, 'aUv') };
   const U = {};
-  for (const n of ['uVP', 'uModel', 'uTex', 'uUseTex', 'uColor', 'uLit', 'uSpec', 'uLight', 'uEye', 'uFade']) U[n] = gl.getUniformLocation(prog, n);
-  gl.uniform3fv(U.uLight, v3.norm([0.35, 1, 0.5]));
+  for (const n of ['uVP', 'uModel', 'uNormal', 'uTex', 'uUseTex', 'uColor', 'uLit', 'uSpec', 'uLight', 'uEye', 'uFade',
+    'uSky', 'uGround', 'uSun', 'uPointPos', 'uPointCol', 'uPointRange', 'uShadow', 'uShadowOn', 'uTexel', 'uLVP',
+    'uFogCol', 'uFog', 'uAlphaTest', 'uEmit', 'uBias']) U[n] = gl.getUniformLocation(prog, n);
   gl.enable(gl.DEPTH_TEST);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  const uintIdx = gl.getExtension('OES_element_index_uint');
+
+  // Real shadows: the scene is drawn once from the sun into a depth texture.
+  // Needs high precision in fragment shaders (most phones have it).
+  const hp = gl.getShaderPrecisionFormat?.(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT);
+  let shadow = null;
+  if (hp && hp.precision > 0) {
+    try {
+      const sprog = link(SVS, SFS, ['aPos', null, 'aUv']);
+      const SU = {};
+      for (const n of ['uLVP', 'uModel', 'uTex', 'uAlphaTest']) SU[n] = gl.getUniformLocation(sprog, n);
+      const coarse = matchMedia?.('(pointer: coarse)').matches;
+      const size = Math.min(coarse ? 1024 : 2048, gl.getParameter(gl.MAX_TEXTURE_SIZE));
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      const depth = gl.createRenderbuffer();
+      gl.bindRenderbuffer(gl.RENDERBUFFER, depth);
+      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, size, size);
+      const fbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth);
+      const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      if (ok) shadow = { prog: sprog, U: SU, tex, fbo, size, lvp: null };
+    } catch (err) {
+      console.warn('No shadows:', err);
+    }
+    gl.useProgram(prog);
+  }
+  gl.uniform1i(U.uTex, 0);
+  gl.uniform1i(U.uShadow, 1);
 
   const mesh = (geo) => {
     const buf = (data, T = Float32Array, target = gl.ARRAY_BUFFER) => {
@@ -628,9 +588,11 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
       gl.bufferData(target, new T(data), gl.STATIC_DRAW);
       return b;
     };
+    const big = geo.pos.length / 3 > 65535 && uintIdx;
     return {
-      pos: buf(geo.pos), nor: buf(geo.nor), uv: buf(geo.uv),
-      idx: buf(geo.idx, Uint16Array, gl.ELEMENT_ARRAY_BUFFER), count: geo.idx.length,
+      pos: buf(geo.pos), nor: buf(geo.nor), uv: buf(geo.uv), col: geo.col ? buf(geo.col) : null,
+      idx: buf(geo.idx, big ? Uint32Array : Uint16Array, gl.ELEMENT_ARRAY_BUFFER), count: geo.idx.length,
+      type: big ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT,
     };
   };
   const aniso = gl.getExtension('EXT_texture_filter_anisotropic') || gl.getExtension('WEBKIT_EXT_texture_filter_anisotropic');
@@ -640,6 +602,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     return t;
   };
   function uploadTexture(t, cnv, repeat = false) {
+    cnv = toPOT(cnv);
     gl.bindTexture(gl.TEXTURE_2D, t);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, cnv);
@@ -661,43 +624,67 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   const diceTex = texture(atlas.cnv);
   const shadowTex = texture(radialTexture('rgba(0,0,0,0.55)', 'rgba(0,0,0,0)'));
   const cardTex = texture(drawCardBacks());
+  const glowTex = texture(radialTexture('rgba(255,255,255,1)', 'rgba(255,255,255,0)'));
   // the table under the board: a repeating tile, one tile every 6 units
   const TABLE = 90;
   let background = bgByKey('classic');
   const tableTex = texture(drawTableTile(background), true);
-  const sceneTex = {};
-  const stex = (name) => (sceneTex[name] ??= texture(SCENE_TEXTURES[name](), true));
   const GLOW_PAD = 0.14; // world units the glow spills past the square
   const glowEdgeTex = texture(glowTexture(256, 512, [GLOW_PAD / (W + 2 * GLOW_PAD), GLOW_PAD / (C + 2 * GLOW_PAD)]));
   const glowCornerTex = texture(glowTexture(512, 512, [GLOW_PAD / (C + 2 * GLOW_PAD), GLOW_PAD / (C + 2 * GLOW_PAD)]));
 
+  // Scenery textures are painted on demand, one per tick, so switching scenes never
+  // freezes the page; until one is ready its average colour stands in.
+  const sceneTex = new Map(); // name -> { tex, ready }
+  const texQueue = [];
+  let texTimer = 0;
+  const solid = (rgb) => { const c = document.createElement('canvas'); c.width = c.height = 4; const g = c.getContext('2d'); g.fillStyle = `rgb(${rgb.join(',')})`; g.fillRect(0, 0, 4, 4); return c; };
+  function paintNextTexture() {
+    texTimer = 0;
+    const name = texQueue.shift();
+    const e = name && sceneTex.get(name);
+    if (e && !e.ready) {
+      try { uploadTexture(e.tex, TEXTURES[name].make(), TEXTURES[name].tile); } catch (err) { console.warn('texture', name, err); }
+      e.ready = true;
+      dirty = true;
+    }
+    if (texQueue.length) texTimer = setTimeout(paintNextTexture, 0);
+  }
+  function sceneTexture(name) {
+    let e = sceneTex.get(name);
+    if (!e) {
+      const def = TEXTURES[name];
+      if (!def) throw new Error(`no texture ${name}`);
+      e = { tex: texture(solid(def.avg), def.tile), ready: false };
+      sceneTex.set(name, e);
+      texQueue.push(name);
+      if (!texTimer) texTimer = setTimeout(paintNextTexture, 0);
+    }
+    return e.tex;
+  }
+  function dropSceneTextures() {
+    for (const e of sceneTex.values()) gl.deleteTexture(e.tex);
+    sceneTex.clear();
+    texQueue.length = 0;
+  }
+
   const M = {
     plane: mesh(planeGeo()),
-    table: mesh((() => { const g = planeGeo(); g.uv = g.uv.map((v) => v * (TABLE / 6)); return g; })()),
+    table: mesh(planeGeo(TABLE / 6)),
     roof: mesh(roofGeo()),
-    // scenery pieces with tiled texture coordinates
-    tabletop: mesh(boxGeo(1, 1, 1, [[0, 0, 2.7, 0.06], [0, 0, 2.7, 0.06], [0, 0, 2.7, 2.7], [0, 0, 2.7, 2.7], [0, 0, 2.7, 0.06], [0, 0, 2.7, 0.06]])),
-    floor: mesh((() => { const g = planeGeo(); g.uv = g.uv.map((v) => v * 7); return g; })()),
-    wall: mesh(boxGeo(1, 1, 1, Array(6).fill([0, 0, 7, 2.3]))),
-    sea: mesh((() => { const g = planeGeo(); g.uv = g.uv.map((v, i) => v * (i % 2 ? 8 : 14)); return g; })()),
-    // unit shapes for the player pieces (see pieces.js)
-    sphere: mesh(latheGeo(Array.from({ length: 13 }, (_, i) => {
-      const a = -Math.PI / 2 + (i / 12) * Math.PI;
-      return [0.5 * Math.cos(a), 0.5 * Math.sin(a)];
-    }), 20)),
-    half: mesh(latheGeo(Array.from({ length: 8 }, (_, i) => {
-      const a = (i / 7) * (Math.PI / 2);
+    disc: mesh(discGeo(64)),
+    // unit shapes for the player pieces (see pieces.js) and the scenery
+    sphere: mesh(sphereGeo(40, 24)),
+    half: mesh(latheGeo(Array.from({ length: 12 }, (_, i) => {
+      const a = (i / 11) * (Math.PI / 2);
       return [0.5 * Math.cos(a), Math.sin(a)];
-    }).concat([[0, 1]]).reverse().concat([[0, 0]]).reverse(), 20)),
-    cyl: mesh(latheGeo([[0, 0], [0.5, 0], [0.5, 0], [0.5, 1], [0.5, 1], [0, 1]], 20)),
-    cone: mesh(latheGeo([[0, 0], [0.5, 0], [0.5, 0], [0, 1]], 20)),
-    torus: mesh(latheGeo(Array.from({ length: 13 }, (_, i) => {
-      const a = (i / 12) * Math.PI * 2;
-      return [0.35 + 0.15 * Math.cos(a), 0.15 * Math.sin(a)];
-    }), 24)),
-    slab: mesh(boxGeo(L, 0.3, L)),
+    }).concat([[0, 1]]).reverse().concat([[0, 0]]).reverse(), 40)),
+    cyl: mesh(cylGeo(40)),
+    cone: mesh(coneGeo(40)),
+    torus: mesh(torusGeo(0.35, 0.15, 48, 18)),
+    slab: mesh(rboxGeo(L, 0.3, L, 0.05, 3)),
     box: mesh(boxGeo(1, 1, 1)),
-    pawn: mesh(latheGeo(pawnProfile(), 28)),
+    pawn: mesh(latheGeo(pawnProfile(), 40)),
     // face order +x,-x,+y,-y,+z,-z -> values 3,4,1,6,2,5 (opposite faces sum to 7)
     die: mesh(boxGeo(DIE, DIE, DIE, [3, 4, 1, 6, 2, 5].map((v) => atlas.rects[v]))),
   };
@@ -799,21 +786,51 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   };
 
   // ----- drawing
-  function draw(m, model, color, tex = null, { lit = true, spec = 0 } = {}) {
-    gl.bindBuffer(gl.ARRAY_BUFFER, m.pos);
-    gl.enableVertexAttribArray(A.pos); gl.vertexAttribPointer(A.pos, 3, gl.FLOAT, false, 0, 0);
-    gl.bindBuffer(gl.ARRAY_BUFFER, m.nor);
-    gl.enableVertexAttribArray(A.nor); gl.vertexAttribPointer(A.nor, 3, gl.FLOAT, false, 0, 0);
-    gl.bindBuffer(gl.ARRAY_BUFFER, m.uv);
-    gl.enableVertexAttribArray(A.uv); gl.vertexAttribPointer(A.uv, 2, gl.FLOAT, false, 0, 0);
+  let pass = 'main'; // 'shadow' while drawing the depth map from the sun
+  let blending = false;
+  function setBlend(on, additive = false) {
+    blending = on;
+    if (on) gl.enable(gl.BLEND); else gl.disable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, on && additive ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA);
+  }
+  /**
+   * Draw a mesh. opts: lit (shading), spec (shine), cast (casts a shadow), alphaTest
+   * (cut out transparent texture pixels), emit (glow brighter than the light).
+   */
+  function draw(m, model, color, tex = null, { lit = true, spec = 0, cast = true, alphaTest = 0, emit = 0 } = {}) {
+    if (pass === 'shadow') {
+      if (!cast || blending) return;
+      gl.bindBuffer(gl.ARRAY_BUFFER, m.pos); gl.vertexAttribPointer(A.pos, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, m.uv); gl.vertexAttribPointer(A.uv, 2, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, m.idx);
+      gl.uniformMatrix4fv(shadow.U.uModel, false, model);
+      const at = alphaTest && tex ? alphaTest : 0;
+      gl.uniform1f(shadow.U.uAlphaTest, at);
+      if (at) { gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex); }
+      gl.drawElements(gl.TRIANGLES, m.count, m.type, 0);
+      return;
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, m.pos); gl.vertexAttribPointer(A.pos, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, m.nor); gl.vertexAttribPointer(A.nor, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, m.uv); gl.vertexAttribPointer(A.uv, 2, gl.FLOAT, false, 0, 0);
+    if (m.col) {
+      gl.enableVertexAttribArray(A.col);
+      gl.bindBuffer(gl.ARRAY_BUFFER, m.col); gl.vertexAttribPointer(A.col, 3, gl.FLOAT, false, 0, 0);
+    } else {
+      gl.disableVertexAttribArray(A.col);
+      gl.vertexAttrib3f(A.col, 1, 1, 1);
+    }
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, m.idx);
     gl.uniformMatrix4fv(U.uModel, false, model);
-    gl.uniform4fv(U.uColor, color.length === 3 ? [...color, 1] : color);
+    gl.uniformMatrix3fv(U.uNormal, false, normalMat(model));
+    gl.uniform4fv(U.uColor, color.length === 3 ? [color[0], color[1], color[2], 1] : color);
     gl.uniform1f(U.uUseTex, tex ? 1 : 0);
-    if (tex) { gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex); gl.uniform1i(U.uTex, 0); }
+    if (tex) { gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex); }
     gl.uniform1f(U.uLit, lit ? 1 : 0);
     gl.uniform1f(U.uSpec, spec);
-    gl.drawElements(gl.TRIANGLES, m.count, gl.UNSIGNED_SHORT, 0);
+    gl.uniform1f(U.uAlphaTest, alphaTest);
+    gl.uniform1f(U.uEmit, emit);
+    gl.drawElements(gl.TRIANGLES, m.count, m.type, 0);
   }
 
   // Building animations: pos -> { from, to, t } while a house/hotel is being added or removed.
@@ -891,162 +908,86 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     return out;
   }
 
-  // ----- scenery around the board (depends on the chosen background)
-  const yaw = (a) => quat.axis([0, 1, 0], a);
-  const prop = (m, at, sc, color, tex = null, q = undefined, opts) => draw(M[m], trs(at, q, sc), typeof color === 'string' ? hexToRgb(color) : color, tex, opts);
+  // ----- scenery around the board (depends on the chosen background, see scenes.js)
+  const meshCache = new Map();
+  const colorCache = new Map();
+  const rgb = (c) => {
+    if (typeof c !== 'string') return c;
+    let v = colorCache.get(c);
+    if (!v) { v = hexToRgb(c); colorCache.set(c, v); }
+    return v;
+  };
+  /** The toolkit the scenes draw with. */
+  const R = {
+    M, trs, quat, mul4, v3, rgb,
+    yaw: (a) => quat.axis([0, 1, 0], a),
+    get pass() { return pass; },
+    get time() { return lastNow / 1000; },
+    tex: sceneTexture,
+    tableTex: () => tableTex,
+    /** A mesh built once from geometry and kept. */
+    mesh(key, make) {
+      let m = meshCache.get(key);
+      if (!m) { m = mesh(make()); meshCache.set(key, m); }
+      return m;
+    },
+    /** Rounded box mesh of an exact size (uv: null = 0..1 per face, or tiles per unit). */
+    rbox(w, h, d, r, uv = null) { return R.mesh(`rbox:${w},${h},${d},${r},${uv}`, () => rboxGeo(w, h, d, r, 4, uv)); },
+    draw,
+    /** put(mesh or name, position, scale, colour, { q, tex, lit, spec, cast, alphaTest, emit }) */
+    put(m, at, sc, color, o = {}) {
+      draw(typeof m === 'string' ? M[m] : m, trs(at, o.q, sc), rgb(color), o.tex ?? null, o);
+    },
+    blend: setBlend,
+    glowTex,
+    /** Run fn with fog switched off (sky domes, far planets). */
+    withoutFog(fn) {
+      const on = pass === 'main' && light.fog;
+      if (on) gl.uniform2f(U.uFog, 0, 0);
+      fn();
+      if (on) gl.uniform2f(U.uFog, light.fog.near, light.fog.far);
+    },
+    /** A glowing sprite that always faces the camera (sun, lamp halos, fire). */
+    glow(c, pos, size, color, alpha = 1) {
+      if (pass !== 'main') return;
+      const r = c.view.x, u = c.view.y, n = c.view.z;
+      const m = [r[0] * size, r[1] * size, r[2] * size, 0, n[0], n[1], n[2], 0, u[0] * size, u[1] * size, u[2] * size, 0, pos[0], pos[1], pos[2], 1];
+      setBlend(true, true);
+      gl.depthMask(false);
+      draw(M.plane, m, [...rgb(color), alpha], glowTex, { lit: false });
+      gl.depthMask(true);
+      setBlend(false);
+    },
+    fade(near = 0, far = 0) { if (pass === 'main') gl.uniform2f(U.uFade, near, far); },
+    /** Soft contact shadow on the ground under something (sx x sz units). */
+    blob(x, z, sx, sz = sx, alpha = 0.45, y = 0, yawA = 0) {
+      if (pass !== 'main') return;
+      setBlend(true);
+      gl.depthMask(false);
+      draw(M.plane, trs([x, y, z], quat.axis([0, 1, 0], yawA), [sx, 1, sz]), [1, 1, 1, alpha], shadowTex, { lit: false });
+      gl.depthMask(true);
+      setBlend(false);
+    },
+  };
 
+  let light = DEFAULT_LIGHT;
   function drawBackdrop(c) {
-    if (background.scene === 'livingroom') return drawLivingRoom(c);
-    // an endless table that fades into the sky
-    gl.enable(gl.BLEND);
+    const scene = SCENES[background.scene];
+    if (scene) { scene.draw(R, c); return; }
+    // flat backgrounds: an endless table that fades into the sky
+    if (pass === 'shadow') return;
+    setBlend(true);
     gl.uniform2f(U.uFade, 16, 34);
-    draw(M.table, trs([0, -0.31, 0], undefined, [TABLE, 1, TABLE]), [1, 1, 1], tableTex, { lit: false });
+    draw(M.table, trs([0, -0.31, 0], undefined, [TABLE, 1, TABLE]), [1, 1, 1], tableTex, { cast: false });
     gl.uniform2f(U.uFade, 0, 0);
-    gl.disable(gl.BLEND);
-    if (background.scene === 'beach') drawBeach();
+    setBlend(false);
   }
 
-  function drawLivingRoom(c) {
-    const F = -3.6; // floor height
-    const R = 15;   // half size of the room
-    // wooden table under the board
-    prop('tabletop', [0, -0.5, 0], [16, 0.38, 16], [1, 1, 1], tableTex, undefined, { spec: 0.15 });
-    for (const [x, z] of [[-7, -7], [7, -7], [-7, 7], [7, 7]]) {
-      prop('box', [x, (F - 0.69) / 2, z], [0.7, -0.69 - F, 0.7], '#7a4a26', null, undefined, { spec: 0.1 });
-    }
-    prop('box', [0, -0.85, 7.6], [14, 0.35, 0.3], '#8a5530'); // apron
-    prop('box', [0, -0.85, -7.6], [14, 0.35, 0.3], '#8a5530');
-    // floor and rug
-    draw(M.floor, trs([0, F, 0], undefined, [R * 2, 1, R * 2]), [1, 1, 1], stex('parquet'), { lit: false });
-    prop('box', [0, F + 0.02, 0], [21, 0.04, 17], [1, 1, 1], stex('rug'));
-    // walls: only the ones behind the scene are drawn, so you look in like a dollhouse
-    const walls = [
-      { at: [0, F + 4.5, -R], sc: [R * 2, 9, 0.3], show: c.eye[2] > -R },
-      { at: [0, F + 4.5, R], sc: [R * 2, 9, 0.3], show: c.eye[2] < R },
-      { at: [-R, F + 4.5, 0], sc: [0.3, 9, R * 2], show: c.eye[0] > -R },
-      { at: [R, F + 4.5, 0], sc: [0.3, 9, R * 2], show: c.eye[0] < R },
-    ];
-    // a wall is drawn only when the camera is on the room side of it
-    for (const w of walls) {
-      if (!w.show) continue;
-      prop('wall', w.at, w.sc, [1, 1, 1], stex('wallpaper'));
-      const inward = Math.sign(-(w.at[0] || w.at[2]));
-      const skirt = w.sc[0] > 1 ? [w.at[0], F + 0.25, w.at[2] + inward * 0.25] : [w.at[0] + inward * 0.25, F + 0.25, w.at[2]];
-      prop('box', skirt, w.sc[0] > 1 ? [R * 2, 0.5, 0.2] : [0.2, 0.5, R * 2], '#f7f1e6');
-    }
-    // window on the left wall
-    if (c.eye[0] > -R) {
-      prop('box', [-R + 0.2, F + 5, -3], [0.15, 4.2, 5.6], '#ffffff');
-      prop('box', [-R + 0.3, F + 5, -3], [0.1, 3.8, 5.2], '#bfe6ff', null, undefined, { lit: false });
-      prop('box', [-R + 0.38, F + 5, -3], [0.06, 3.8, 0.15], '#ffffff');
-      prop('box', [-R + 0.38, F + 5, -3], [0.06, 0.15, 5.2], '#ffffff');
-      prop('box', [-R + 0.5, F + 7.3, -3], [0.3, 0.25, 6.6], '#c9a46a'); // curtain rail
-      prop('box', [-R + 0.5, F + 4.9, -6.6], [0.25, 4.6, 1.2], '#d95f5f');
-      prop('box', [-R + 0.5, F + 4.9, 0.6], [0.25, 4.6, 1.2], '#d95f5f');
-    }
-    // sofa against the back wall
-    if (c.eye[2] > -R) {
-      const sz = -R + 1.6;
-      prop('box', [0, F + 0.9, sz], [8, 1.2, 2.6], '#3e8f8a', null, undefined, { spec: 0.1 });
-      prop('box', [0, F + 2.2, sz - 1.0], [8, 1.8, 0.7], '#357f7a');
-      prop('box', [-4.2, F + 1.6, sz], [0.6, 1.6, 2.6], '#2f716d');
-      prop('box', [4.2, F + 1.6, sz], [0.6, 1.6, 2.6], '#2f716d');
-      prop('box', [-2.4, F + 2.3, sz - 0.4], [1.3, 1.1, 0.5], '#f2c14e', null, yaw(0.15));
-      prop('box', [2.3, F + 2.3, sz - 0.4], [1.3, 1.1, 0.5], '#ff8fa3', null, yaw(-0.2));
-      // picture above the sofa
-      prop('box', [0, F + 6, -R + 0.25], [4.2, 2.8, 0.15], '#6b4423');
-      prop('box', [0, F + 6, -R + 0.33], [3.7, 2.3, 0.05], '#8ec5e8', null, undefined, { lit: false });
-      prop('half', [-0.6, F + 5, -R + 0.36], [2.4, 1.0, 0.05], '#4f9f45');
-      prop('sphere', [1.0, F + 6.6, -R + 0.37], [0.6, 0.6, 0.05], '#ffd84d', null, undefined, { lit: false });
-    }
-    // floor lamp, plant and bookshelf
-    prop('cyl', [10.5, F, -11], [0.9, 0.1, 0.9], '#3a3a3a');
-    prop('cyl', [10.5, F, -11], [0.12, 6.2, 0.12], '#3a3a3a');
-    prop('cone', [10.5, F + 5.6, -11], [2.0, 1.4, 2.0], '#fff1c9', null, undefined, { lit: false });
-    prop('cyl', [-11, F, -11], [1.6, 1.4, 1.6], '#c8693d');
-    for (const [x, y, z, s] of [[-11, 2.1, -11, 1.6], [-11.6, 2.8, -10.6, 1.2], [-10.4, 2.9, -11.4, 1.2], [-11, 3.5, -11, 1.0]]) {
-      prop('sphere', [x, F + y, z], [s, s * 1.2, s], '#3f8f3a', null, undefined, { spec: 0.2 });
-    }
-    if (c.eye[0] < R) {
-      const bx = R - 0.9;
-      prop('box', [bx, F + 3, 6], [1.4, 6, 5], '#8a5530');
-      const books = ['#d94f4f', '#3a86ff', '#f2c14e', '#2ec4b6', '#9b5de5', '#f28482'];
-      for (let shelf = 0; shelf < 3; shelf++) {
-        const y = F + 1.4 + shelf * 1.8;
-        prop('box', [bx - 0.1, y - 0.65, 6], [1.3, 0.12, 4.7], '#6e4224');
-        for (let b = 0; b < 8; b++) {
-          prop('box', [bx - 0.15, y, 4.0 + b * 0.55], [1.0, 1.1 - (b % 3) * 0.15, 0.4], books[(b + shelf) % books.length]);
-        }
-      }
-    }
-  }
-
-  function drawBeach() {
-    // sea and a foamy shoreline behind the board
-    gl.enable(gl.BLEND);
-    gl.uniform2f(U.uFade, 30, 80);
-    draw(M.sea, trs([0, -0.3, -58], undefined, [180, 1, 84]), [1, 1, 1], stex('water'), { lit: false });
-    gl.uniform2f(U.uFade, 0, 0);
-    draw(M.plane, trs([0, -0.298, -16.2], undefined, [180, 1, 0.9]), [1, 1, 1, 0.75], null, { lit: false });
-    gl.disable(gl.BLEND);
-    // umbrella with a towel underneath
-    const tilt = quat.axis([1, 0, 1], 0.12);
-    prop('cyl', [9.6, -0.31, -7.5], [0.16, 4.6, 0.16], '#f4f1e8', null, tilt);
-    prop('cone', [9.35, 3.6, -7.75], [6.4, 1.4, 6.4], [1, 1, 1], stex('stripes'), tilt, { spec: 0.1 });
-    prop('sphere', [9.3, 5.0, -7.8], [0.3, 0.3, 0.3], '#e8473f');
-    prop('box', [9.0, -0.29, -5.6], [3.2, 0.04, 5.4], [1, 1, 1], stex('towel'), yaw(0.35));
-    // beach ball
-    prop('sphere', [-8.6, 0.25, 7.2], [1.15, 1.15, 1.15], [1, 1, 1], stex('ball'), quat.axis([1, 0, 0.4], 0.6), { spec: 0.6 });
-    // bucket and spade
-    prop('cyl', [8.8, -0.31, 8.2], [1.0, 0.9, 1.0], '#3a86ff', null, undefined, { spec: 0.4 });
-    prop('cyl', [8.8, 0.58, 8.2], [1.06, 0.06, 1.06], '#2a6fd6');
-    prop('torus', [8.8, 0.62, 8.2], [1.0, 0.6, 1.0], '#ffd23a', null, quat.axis([1, 0, 0], Math.PI / 2));
-    prop('box', [7.6, -0.25, 8.9], [0.18, 0.08, 1.6], '#e8473f', null, yaw(0.7));
-    prop('box', [7.1, -0.25, 9.5], [0.5, 0.06, 0.6], '#e8473f', null, yaw(0.7));
-    // sandcastle
-    const sand = '#e7c98f';
-    prop('cyl', [-9, -0.31, -7], [3.2, 0.8, 3.2], sand);
-    for (const [dx, dz] of [[-1.1, -1.1], [1.1, -1.1], [-1.1, 1.1], [1.1, 1.1]]) {
-      prop('cyl', [-9 + dx, 0.49, -7 + dz], [0.9, 0.9, 0.9], sand);
-      prop('cone', [-9 + dx, 1.39, -7 + dz], [1.0, 0.6, 1.0], '#dcb879');
-    }
-    prop('cyl', [-9, 0.49, -7], [1.3, 1.6, 1.3], sand);
-    prop('cone', [-9, 2.09, -7], [1.4, 0.9, 1.4], '#dcb879');
-    prop('cyl', [-9, 2.9, -7], [0.05, 1.0, 0.05], '#6b4423');
-    prop('box', [-8.75, 3.7, -7], [0.5, 0.3, 0.03], '#e8473f');
-    // palm tree
-    let px = -11.5, py = -0.31, pz = 9.5;
-    for (let i = 0; i < 7; i++) {
-      prop('cyl', [px, py, pz], [0.55 - i * 0.03, 0.75, 0.55 - i * 0.03], i % 2 ? '#a27b4f' : '#8c6a42', null, quat.axis([0, 0, 1], -0.08 * i));
-      px += 0.06 * i; py += 0.72;
-    }
-    for (let k = 0; k < 7; k++) {
-      const a = (k / 7) * Math.PI * 2;
-      const q = quat.mul(yaw(a), quat.axis([1, 0, 0], 0.55));
-      prop('sphere', [px + Math.sin(a) * 1.3, py + 0.1, pz + Math.cos(a) * 1.3], [0.7, 0.18, 2.8], '#3f9a45', null, q, { spec: 0.2 });
-    }
-    prop('sphere', [px + 0.25, py - 0.25, pz], [0.38, 0.38, 0.38], '#6b4423');
-    prop('sphere', [px - 0.2, py - 0.3, pz + 0.2], [0.38, 0.38, 0.38], '#6b4423');
-  }
-
-  function render() {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = Math.round(canvas.clientWidth * dpr), h = Math.round(canvas.clientHeight * dpr);
-    if (!w || !h) return;
-    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
-    gl.viewport(0, 0, w, h);
-    gl.clearColor(0, 0, 0, 0); // the sky behind is the page's CSS background
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    const c = camera();
-    gl.uniformMatrix4fv(U.uVP, false, mul4(c.proj, c.view.m));
-    gl.uniform3fv(U.uEye, c.eye);
-    gl.disable(gl.BLEND);
-    gl.depthMask(true);
-
+  /** Everything solid: scenery, board, buildings, pieces, dice, card piles. */
+  function drawOpaque(c) {
     drawBackdrop(c);
-    draw(M.slab, trs([0, -0.15, 0]), [0.16, 0.2, 0.17]);
-    draw(M.plane, trs([0, 0.001, 0], undefined, [L, 1, L]), [1, 1, 1], boardTex);
-
+    draw(M.slab, trs([0, -0.15, 0]), [0.16, 0.2, 0.17], null, { spec: 0.15 });
+    draw(M.plane, trs([0, 0.001, 0], undefined, [L, 1, L]), [1, 1, 1], boardTex, { cast: false, spec: 0.04 });
     const buildings = buildingList();
     for (const b of buildings) {
       if (b.s <= 0.01) continue;
@@ -1056,13 +997,12 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
       if (b.hotel) {
         draw(M.box, trs([b.at[0], y(0.085), b.at[1]], q, sc([0.44, 0.17, 0.18])), [0.8, 0.2, 0.16], null, { spec: 0.25 });
         draw(M.roof, trs([b.at[0], y(0.17), b.at[1]], q, sc([0.47, 0.09, 0.2])), [0.58, 0.12, 0.1], null, { spec: 0.2 });
-        draw(M.box, trs([b.at[0], y(0.085), b.at[1] ], q, sc([0.08, 0.1, 0.185])), [0.95, 0.88, 0.62], null, { spec: 0.1 });
+        draw(M.box, trs([b.at[0], y(0.085), b.at[1]], q, sc([0.08, 0.1, 0.185])), [0.95, 0.88, 0.62], null, { spec: 0.1 });
       } else {
         draw(M.box, trs([b.at[0], y(0.055), b.at[1]], q, sc([0.15, 0.11, 0.15])), [0.2, 0.64, 0.34], null, { spec: 0.25 });
         draw(M.roof, trs([b.at[0], y(0.11), b.at[1]], q, sc([0.175, 0.08, 0.17])), [0.11, 0.42, 0.22], null, { spec: 0.2 });
       }
     }
-
     for (const [id, t] of tokens) {
       if (!t.visible) continue;
       drawPiece(id, t);
@@ -1076,27 +1016,107 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
       draw(M.card[deck], trs([pl.at[0], h / 2, pl.at[1]], quat.axis([0, 1, 0], pl.yaw), [CARD_W, h, CARD_D]), [1, 1, 1], cardTex, { spec: 0.15 });
     }
     if (flying) draw(M.card[flying.deck], trs(flying.p, flying.q, [CARD_W, CARD_T * 1.5, CARD_D]), [1, 1, 1], cardTex, { spec: 0.3 });
+    return buildings;
+  }
+
+  /** Point the sun's depth camera at the scene. */
+  function shadowCamera(scene) {
+    const reg = scene?.shadow ?? { center: [0, 0, 0], radius: 9 };
+    const Ld = v3.norm(light.dir);
+    const r = reg.radius;
+    const eye = v3.add(reg.center, v3.scale(Ld, r * 2));
+    const lv = lookAt(eye, reg.center, Math.abs(Ld[1]) > 0.98 ? [0, 0, -1] : [0, 1, 0]);
+    return { lvp: mul4(ortho(-r, r, -r, r, 0.1, r * 4), lv.m), range: r * 4 };
+  }
+
+  function render() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.round(canvas.clientWidth * dpr), h = Math.round(canvas.clientHeight * dpr);
+    if (!w || !h) return;
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    const c = camera();
+    const scene = SCENES[background.scene];
+    light = scene?.light ?? DEFAULT_LIGHT;
+    const useShadow = !!shadow && light.shadows !== false;
+
+    if (useShadow) {
+      const sc = shadowCamera(scene);
+      shadow.lvp = sc.lvp;
+      shadow.range = sc.range;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, shadow.fbo);
+      gl.viewport(0, 0, shadow.size, shadow.size);
+      gl.clearColor(1, 1, 1, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.useProgram(shadow.prog);
+      gl.uniformMatrix4fv(shadow.U.uLVP, false, shadow.lvp);
+      gl.disableVertexAttribArray(A.nor);
+      gl.disableVertexAttribArray(A.col);
+      gl.enableVertexAttribArray(A.pos);
+      gl.enableVertexAttribArray(A.uv);
+      setBlend(false);
+      gl.depthMask(true);
+      pass = 'shadow';
+      try { drawOpaque(c); } finally { pass = 'main'; }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.useProgram(prog);
+    }
+
+    gl.viewport(0, 0, w, h);
+    gl.clearColor(0, 0, 0, 0); // the sky behind is the page's CSS background
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enableVertexAttribArray(A.pos);
+    gl.enableVertexAttribArray(A.nor);
+    gl.enableVertexAttribArray(A.uv);
+    gl.uniformMatrix4fv(U.uVP, false, mul4(c.proj, c.view.m));
+    gl.uniform3fv(U.uEye, c.eye);
+    gl.uniform3fv(U.uLight, v3.norm(light.dir));
+    gl.uniform3fv(U.uSky, light.sky);
+    gl.uniform3fv(U.uGround, light.ground);
+    gl.uniform3fv(U.uSun, light.sun);
+    if (light.point) {
+      gl.uniform3fv(U.uPointPos, light.point.pos);
+      gl.uniform3fv(U.uPointCol, light.point.col);
+      gl.uniform1f(U.uPointRange, light.point.range);
+    } else gl.uniform1f(U.uPointRange, 0);
+    if (light.fog) {
+      gl.uniform3fv(U.uFogCol, light.fog.col);
+      gl.uniform2f(U.uFog, light.fog.near, light.fog.far);
+    } else gl.uniform2f(U.uFog, 0, 0);
+    gl.uniform2f(U.uFade, 0, 0);
+    gl.uniform1f(U.uShadowOn, useShadow ? 1 : 0);
+    if (useShadow) {
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, shadow.tex);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.uniformMatrix4fv(U.uLVP, false, shadow.lvp);
+      gl.uniform1f(U.uTexel, 1 / shadow.size);
+      gl.uniform1f(U.uBias, 0.03 / shadow.range);
+    }
+    setBlend(false);
+    gl.depthMask(true);
+    const buildings = drawOpaque(c);
+    const blobK = useShadow ? 0.6 : 1; // contact shadows are softer when real shadows are on
 
     // transparent: shadows, rings, selection
-    gl.enable(gl.BLEND);
+    setBlend(true);
     gl.depthMask(false);
     for (const [id, t] of tokens) {
       if (!t.visible) continue;
       const s = 0.42 * (1 + t.lift * 0.4);
-      draw(M.plane, trs([t.x + 0.03, 0.003, t.z + 0.03], undefined, [s, 1, s]), [1, 1, 1, 1 / (1 + t.lift * 1.5)], shadowTex, { lit: false });
+      draw(M.plane, trs([t.x + 0.03, 0.003, t.z + 0.03], undefined, [s, 1, s]), [1, 1, 1, blobK / (1 + t.lift * 1.5)], shadowTex, { lit: false });
     }
     for (const d of dice) {
       const s = DIE * 1.6 * (1 + (d.p[1] - DIE / 2) * 0.35);
-      draw(M.plane, trs([d.p[0] + 0.06, 0.003, d.p[2] + 0.06], undefined, [s, 1, s]), [1, 1, 1, 0.9 / (1 + (d.p[1] - DIE / 2) * 0.8)], shadowTex, { lit: false });
+      draw(M.plane, trs([d.p[0] + 0.06, 0.003, d.p[2] + 0.06], undefined, [s, 1, s]), [1, 1, 1, 0.9 * blobK / (1 + (d.p[1] - DIE / 2) * 0.8)], shadowTex, { lit: false });
     }
     for (const b of buildings) {
       if (b.s <= 0.01) continue;
       const w = (b.hotel ? 0.62 : 0.26) * b.s * (1 + b.dy * 0.5);
-      draw(M.plane, trs([b.at[0] + 0.03, 0.0025, b.at[1] + 0.03], quat.axis([0, 1, 0], b.yaw), [w, 1, w * (b.hotel ? 0.5 : 1)]), [1, 1, 1, 0.55 / (1 + b.dy * 2)], shadowTex, { lit: false });
+      draw(M.plane, trs([b.at[0] + 0.03, 0.0025, b.at[1] + 0.03], quat.axis([0, 1, 0], b.yaw), [w, 1, w * (b.hotel ? 0.5 : 1)]), [1, 1, 1, 0.55 * blobK / (1 + b.dy * 2)], shadowTex, { lit: false });
     }
     for (const deck of ['fortune', 'community']) {
       const pl = PILE[deck];
-      draw(M.plane, trs([pl.at[0] + 0.05, 0.002, pl.at[1] + 0.05], quat.axis([0, 1, 0], pl.yaw), [CARD_W * 1.25, 1, CARD_D * 1.35]), [1, 1, 1, 0.45], shadowTex, { lit: false });
+      draw(M.plane, trs([pl.at[0] + 0.05, 0.002, pl.at[1] + 0.05], quat.axis([0, 1, 0], pl.yaw), [CARD_W * 1.25, 1, CARD_D * 1.35]), [1, 1, 1, 0.45 * blobK], shadowTex, { lit: false });
     }
     if (landing && landing.alpha > 0.02) {
       const pos = landing.pos;
@@ -1141,6 +1161,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
       draw(M.plane, trs([cx, 0.005, cz], undefined, sz), [1, 0.85, 0.2, 0.35], null, { lit: false });
     }
     gl.depthMask(true);
+    setBlend(false);
     placeBadge();
   }
 
@@ -1291,6 +1312,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   }
 
   let rafId = 0;
+  let lastAnim = 0;
   function frame(now) {
     rafId = requestAnimationFrame(frame);
     const dt = Math.min(0.1, (now - (lastNow || now)) / 1000);
@@ -1298,6 +1320,8 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     if (follow.on && updateFollow(dt)) dirty = true;
     if (flyKeys(dt)) dirty = true;
     if ((path && path.alpha > 0) || (landing && landing.alpha > 0)) dirty = true; // keep highlights pulsing
+    // scenes with moving bits (fire, drifting rocks) redraw a few times a second
+    if (SCENES[background.scene]?.animate && now - lastAnim > 70 && !document.hidden) { lastAnim = now; dirty = true; }
     for (const tw of [...tweens]) {
       const t = Math.min(1, (now - tw.start) / tw.dur);
       tw.fn(t);
@@ -1669,13 +1693,17 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
 
   /** Change the table/sky theme (see backgrounds.js). */
   api.setBackground = (key) => {
-    background = bgByKey(key);
+    const next = bgByKey(key);
+    if (next.scene !== background.scene) dropSceneTextures();
+    background = next;
     uploadTexture(tableTex, drawTableTile(background), true);
     canvas.parentElement?.style.setProperty('background', background.sky);
     canvas.parentElement?.setAttribute('data-bg', background.key);
     dirty = true;
   };
   api.background = () => background.key;
+  /** How many scenery textures are still being painted (for tests). */
+  api.texturesPending = () => texQueue.length + (texTimer ? 1 : 0);
 
   api.destroy = () => {
     cancelAnimationFrame(rafId);

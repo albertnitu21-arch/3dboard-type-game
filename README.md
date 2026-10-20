@@ -36,14 +36,31 @@ after 60 seconds so the game never gets stuck.
 board. When someone draws one, the top card lifts off the pile and everyone sees
 a pop-up with who drew it and what it says.
 
+**Your moves** (Roll dice, Buy, Auction, End turn, bids, paying debts) float in a
+small bar at the bottom of the board, with Auto roll / Auto end switches. The
+board is framed so the bar never covers it, on computers and phones.
+
 **Fullscreen and backgrounds:** **▣ Fill window** makes the board fill the
 browser window while keeping the tabs and address bar; **⛶ Fullscreen** fills the
-whole screen (and hides the browser bars where the browser allows); the side panel
-floats on top and can be hidden. The 🎨 menu picks the table the board sits on:
-Classic, Picnic, Meadow, Starry night, Candy, Living room (a real wooden table
-with a rug, sofa, window, lamp and bookshelf; the wall nearest the camera is cut
-away) or Beach (sea, umbrella, towel, sandcastle, palm tree, beach ball). Drawn in
-`public/backgrounds.js` and `public/board3d.js`. Both choices are per device.
+whole screen (and hides the browser bars where the browser allows); the side
+panel floats on top and can be hidden. The 🎨 menu picks where the game is played:
+
+- **3D scenes** (`public/scenes.js`): Living room (a coffee table just bigger than
+  the board, sofa, armchair, bookshelf, window, sleeping cat), Beach (umbrella,
+  loungers, palms, sandcastle, sea), Garden picnic (blanket, basket, fence,
+  flowers, trees, gnome), Casino (poker table with chips and cards, slot machines,
+  roulette, bar), Winter cabin (fireplace with a flickering fire, Christmas tree,
+  presents) and Space (floating platform, planets, asteroids, satellite).
+- **Flat tables** (`public/backgrounds.js`): Classic, Meadow, Starry night, Candy.
+
+Both choices are per device.
+
+The renderer has real shadows (a shadow map from the sun), sky and ground light,
+a lamp or fire light per scene, fog for outdoor scenes, rounded and smooth shapes
+(`public/geometry.js`) and textures painted with noise in code
+(`public/textures.js`, no image files). Textures are painted a few at a time in the
+background, so a new scene appears at once and sharpens over a second or two.
+Phones without high-precision shaders skip the shadows.
 
 **Leaving and restarting:** **Leave game** hands your seat to a bot and takes
 you back to the start page so you can create or join another room. The host
@@ -90,7 +107,11 @@ server/
 public/     web client
   app.js      lobby, side panel, animation queue, card pop-up, 2D fallback board
   trade.js    trade window (title-deed cards, live offer, incoming offers)
-  board3d.js  3D board on plain WebGL: board texture, tokens, houses, dice, camera
+  board3d.js  3D board on plain WebGL: board texture, tokens, houses, dice, camera, shadows
+  scenes.js   3D scenery for each background (living room, beach, casino...)
+  geometry.js meshes: rounded boxes, lathes, leaves, rocks, merging many parts
+  textures.js procedural textures (wood, fabric, sand, water, grass, stone...)
+  math3d.js   vectors, quaternions, matrices
 test/       engine, simulation and server tests
 ```
 
