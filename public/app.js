@@ -45,8 +45,13 @@ async function api(path, body) {
 }
 const roomApi = (verb, body) => api(`/api/rooms/${session.code}/${verb}`, { token: session.token, ...body });
 
+function dockError(msg = '') {
+  $('dock-error').textContent = msg;
+  $('dock-error').hidden = !msg;
+}
 async function act(action) {
   $('game-error').textContent = '';
+  dockError();
   // Lock the buttons until the result has been animated, so nothing is sent twice.
   const buttons = document.querySelectorAll('#actions button, #mine button');
   buttons.forEach((b) => { b.disabled = true; });
@@ -54,6 +59,7 @@ async function act(action) {
     await roomApi('action', { action });
   } catch (e) {
     $('game-error').textContent = e.message;
+    dockError(e.message);
     buttons.forEach((b) => { b.disabled = false; });
   }
 }
@@ -434,6 +440,7 @@ function render() {
   show('game');
   $('toggle-view').hidden = !board3d;
   $('toggle-view').textContent = use3d ? '2D view' : '3D view';
+  $('toggle-view').dataset.icon = use3d ? '2D' : '3D';
   $('reset-view').hidden = !use3d;
   $('cam-mode').closest('.cam-select').hidden = !use3d;
   $('bg-mode').closest('.cam-select').hidden = !use3d;
@@ -611,7 +618,7 @@ const autoEnd = makeAuto({
 });
 // Auto roll only for a plain roll: in jail you get to choose (pay, use a card, or roll).
 const autoRoll = makeAuto({
-  action: 'roll', label: 'Roll dice', seconds: 3, key: 'estate-auto-roll',
+  action: 'roll', label: '🎲 Roll dice', seconds: 3, key: 'estate-auto-roll',
   canRun: (legal) => has(legal, 'roll') && !has(legal, 'pay_jail_fine') && !has(legal, 'use_jail_card'),
 });
 function scheduleAutoEnd() { autoEnd.schedule(); autoRoll.schedule(); }
@@ -623,35 +630,47 @@ document.addEventListener('pointerdown', (e) => {
 
 function renderSide() {
   const { state, legal } = game;
-  $('status').textContent = statusText();
+  const p = me();
+  $('status').textContent = statusText() + (p?.bankrupt ? " You're out, you can keep watching." : '');
   const buttons = [];
   const LABEL = {
-    roll: 'Roll dice', pay_jail_fine: `Pay fine (${state.rules.jailFine})`, use_jail_card: 'Use jail card',
-    buy: 'Buy', decline: 'Auction it', pass: 'Pass', end_turn: 'End turn', pay_debt: 'Pay debt',
-    declare_bankruptcy: 'Declare bankruptcy',
+    roll: '🎲 Roll dice', pay_jail_fine: `Pay fine (${state.rules.jailFine})`, use_jail_card: 'Use jail card',
+    buy: `Buy${state.phase === 'buy' ? ` (${BOARD[state.buy.pos].price})` : ''}`, decline: 'Auction it', pass: 'Pass',
+    end_turn: 'End turn', pay_debt: 'Pay debt', declare_bankruptcy: 'Go bankrupt',
   };
   for (const a of legal) {
     if (a.type === 'bid') {
-      const input = el('input', { type: 'number', min: a.min, max: a.max, value: a.min, 'aria-label': 'Bid amount' });
-      buttons.push(el('div', { class: 'row' }, input,
+      const input = el('input', { type: 'number', min: a.min, max: a.max, value: a.min, 'aria-label': 'Bid amount', inputmode: 'numeric' });
+      buttons.push(el('div', { class: 'row bid-row' }, input,
         el('button', { class: 'primary', onclick: () => act({ type: 'bid', amount: Number(input.value) }) }, 'Bid')));
     } else if (LABEL[a.type]) {
       const danger = a.type === 'declare_bankruptcy';
       buttons.push(el('button', {
-        class: ['roll', 'buy', 'end_turn', 'pay_debt'].includes(a.type) ? 'primary' : '',
+        type: 'button',
+        class: ['roll', 'buy', 'end_turn', 'pay_debt'].includes(a.type) ? 'primary' : danger ? 'danger' : '',
         'data-action': a.type,
         onclick: () => (!danger || confirm('Give up and go bankrupt?')) && act({ type: a.type }),
       }, LABEL[a.type]));
     }
   }
-  const p = me();
-  if (p?.bankrupt) buttons.push(el('div', { class: 'tag' }, "You're out. You can keep watching."));
-  const toggle = (auto, text, title) => el('label', { class: 'auto-end', title },
+  const toggle = (auto, text, title) => el('label', { class: 'auto-chip', title },
     el('input', { type: 'checkbox', checked: auto.on() || null, onchange: (e) => { auto.set(e.target.checked); scheduleAutoEnd(); } }),
-    text);
-  if (has(legal, 'roll')) buttons.push(toggle(autoRoll, 'Auto roll', 'Roll the dice by itself a few seconds after your turn starts (not in Pușcărie)'));
-  if (has(legal, 'end_turn')) buttons.push(toggle(autoEnd, 'Auto end turn', 'End your turn by itself a few seconds after your move'));
+    el('span', {}, text));
+  const opts = [];
+  if (has(legal, 'roll')) opts.push(toggle(autoRoll, 'Auto roll', 'Roll the dice by itself a few seconds after your turn starts (not in Pușcărie)'));
+  if (has(legal, 'end_turn')) opts.push(toggle(autoEnd, 'Auto end', 'End your turn by itself a few seconds after your move'));
   $('actions').replaceChildren(...buttons);
+  $('dock-opts').replaceChildren(...opts);
+  $('dock-status').textContent = statusText();
+  const wasHidden = $('dock').hidden;
+  $('dock').hidden = !buttons.length;
+  if (!buttons.length) dockError();
+  if (wasHidden && buttons.length) {
+    // replay the pop-in animation each time it is your move
+    $('dock').classList.remove('pop');
+    void $('dock').offsetWidth;
+    $('dock').classList.add('pop');
+  }
   scheduleAutoEnd();
 
   const isHost = lobby.hostId === session.id;
@@ -845,9 +864,13 @@ function updateViewInset() {
   const panelShown = full && !document.body.classList.contains('panel-hidden');
   const side = document.querySelector('#game .side');
   const wide = innerWidth > 760;
-  board3d.setViewInset(panelShown && wide && side ? side.getBoundingClientRect().width + 24 : 0);
+  const right = panelShown && wide && side ? side.getBoundingClientRect().width + 24 : 0;
+  // room at the bottom for the floating move buttons (the dock)
+  board3d.setViewInset(right, innerWidth <= 600 ? 64 : 76);
+  $('game').style.setProperty('--inset-r', `${right}px`);
 }
 addEventListener('resize', updateViewInset);
+updateViewInset();
 $('fullscreen').onclick = () => toggleFull('screen');
 $('fill-window').onclick = () => toggleFull('window');
 $('panel-toggle').onclick = () => {

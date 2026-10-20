@@ -61,18 +61,26 @@
             <span aria-hidden="true">🎨</span>
             <select id="bg-mode" aria-label="Background"></select>
           </label>
-          <button id="reset-view" class="small" title="Reset camera">Reset view</button>
-          <button id="toggle-view" class="small">2D view</button>
-          <button id="panel-toggle" class="small" type="button" hidden>Hide panel</button>
+          <button id="reset-view" class="small" title="Reset camera" data-icon="⟲">Reset view</button>
+          <button id="toggle-view" class="small" data-icon="2D">2D view</button>
+          <button id="panel-toggle" class="small" type="button" data-icon="☰" hidden>Hide panel</button>
           <button id="sound-toggle" class="small" type="button" title="Sound on/off" aria-pressed="true">🔊</button>
-          <button id="fill-window" class="small" type="button" title="Board fills the browser window (tabs and address bar stay visible)" aria-pressed="false">▣ Fill window</button>
-          <button id="fullscreen" class="small" type="button" title="Fill the whole screen with the board" aria-pressed="false">⛶ Fullscreen</button>
+          <button id="fill-window" class="small" type="button" data-icon="▣" title="Board fills the browser window (tabs and address bar stay visible)" aria-pressed="false">▣ Fill window</button>
+          <button id="fullscreen" class="small" type="button" data-icon="⛶" title="Fill the whole screen with the board" aria-pressed="false">⛶ Fullscreen</button>
+        </div>
+        <!-- your moves (roll, buy, end turn...) float over the board -->
+        <div id="dock" class="dock" hidden>
+          <div id="dock-status" class="dock-status"></div>
+          <div class="dock-row">
+            <div id="actions" class="actions"></div>
+            <div id="dock-opts" class="dock-opts"></div>
+          </div>
+          <p id="dock-error" class="dock-error" role="alert" hidden></p>
         </div>
       </div>
       <aside class="side">
         <div id="away-bar" class="away-bar" hidden></div>
         <div id="status" class="status"></div>
-        <div id="actions" class="actions"></div>
         <p id="game-error" class="error" role="alert"></p>
         <div id="space-info" class="space-info" hidden></div>
         <ul id="players" class="players"></ul>

@@ -758,12 +758,15 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   // ----- camera
   // Pixels on the right covered by a floating panel: the board is centred in the rest.
   let insetRight = 0;
+  let insetBottom = 0; // pixels at the bottom kept for the floating move buttons
   const lensShift = () => (canvas.clientWidth ? insetRight / canvas.clientWidth : 0);
+  const lensShiftY = () => (canvas.clientHeight ? Math.min(insetBottom, canvas.clientHeight * 0.3) / canvas.clientHeight : 0);
   function fitRadius() {
     const aspect = (canvas.clientWidth - insetRight) / Math.max(canvas.clientHeight, 1);
     const fov = (38 * Math.PI) / 180;
     const th = Math.tan(fov / 2);
-    return Math.min(Math.max(6.7 / (th * aspect), 5.6 / th, 9), 34);
+    const tv = th * (1 - lensShiftY()); // the part of the height not covered by the buttons
+    return Math.min(Math.max(6.7 / (th * aspect), 5.6 / tv, 9), 34);
   }
   function camera() {
     const target = cam.target ?? [0, 0, 0.35];
@@ -778,12 +781,13 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     const fov = (38 * Math.PI) / 180;
     const proj = perspective(fov, aspect, 0.5, 200);
     proj[8] = lensShift(); // shift the picture left when a panel covers the right side
+    proj[9] = -lensShiftY(); // and up, clear of the move buttons at the bottom
     return { eye, view, proj, fov, aspect };
   }
   function topRadius() {
-    const aspect = canvas.clientWidth / Math.max(canvas.clientHeight, 1);
+    const aspect = (canvas.clientWidth - insetRight) / Math.max(canvas.clientHeight, 1);
     const th = Math.tan((38 * Math.PI) / 360);
-    return Math.min(Math.max(6.1 / (th * Math.min(aspect, 1)), 9), 40);
+    return Math.min(Math.max(6.1 / (th * aspect), 6.1 / (th * (1 - lensShiftY())), 9), 40);
   }
   api.resetView = () => {
     if (follow.on) { follow.yaw = 0; follow.tilt = 0; follow.zoom = 1; dirty = true; return; }
@@ -1393,7 +1397,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   function boardPoint(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
     const nx = ((clientX - rect.left) / rect.width) * 2 - 1 + lensShift();
-    const ny = 1 - ((clientY - rect.top) / rect.height) * 2;
+    const ny = 1 - ((clientY - rect.top) / rect.height) * 2 - lensShiftY();
     const c = camera();
     const th = Math.tan(c.fov / 2);
     const dir = v3.norm(v3.add(v3.scale(c.view.z, -1),
@@ -1410,7 +1414,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   function pick(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
     const nx = ((clientX - rect.left) / rect.width) * 2 - 1 + lensShift();
-    const ny = 1 - ((clientY - rect.top) / rect.height) * 2;
+    const ny = 1 - ((clientY - rect.top) / rect.height) * 2 - lensShiftY();
     const c = camera();
     const th = Math.tan(c.fov / 2);
     const dir = v3.norm(v3.add(v3.scale(c.view.z, -1),
@@ -1424,9 +1428,10 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   }
   api.select = (pos) => { selected = pos; dirty = true; };
   /** Keep the board clear of a panel floating over the right edge (px). */
-  api.setViewInset = (right = 0) => {
-    if (right === insetRight) return;
+  api.setViewInset = (right = 0, bottom = insetBottom) => {
+    if (right === insetRight && bottom === insetBottom) return;
     insetRight = Math.max(0, right);
+    insetBottom = Math.max(0, bottom);
     if (cam.auto) cam.r = camMode === 'top' ? topRadius() : fitRadius();
     dirty = true;
   };
