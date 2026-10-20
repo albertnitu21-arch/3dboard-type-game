@@ -393,6 +393,19 @@ const colorOf = (id) => COLORS[(Number(String(id).slice(1)) - 1 + COLORS.length)
 const sp = (pos) => BOARD[pos].name;
 /** The piece a player picked in the lobby (or a default one). */
 const pieceOf = (id) => pieceByKey(lobby?.members.find((m) => m.id === id)?.piece) ?? pieceFor(id);
+/** A small picture of a piece in a colour (rendered in 3D once, then cached); emoji without WebGL. */
+const pieceThumbs = new Map();
+function pieceIcon(piece, color, cls = 'piece') {
+  if (board3d) {
+    const key = `${piece.key}|${color}`;
+    let src = pieceThumbs.get(key);
+    if (!src) {
+      try { src = board3d.pieceThumbnail(piece, color, 128); pieceThumbs.set(key, src); } catch { src = null; }
+    }
+    if (src) return el('img', { class: `${cls} piece-img`, src, alt: piece.name, title: piece.name, draggable: 'false' });
+  }
+  return el('span', { class: cls, title: piece.name }, piece.emoji);
+}
 
 function describe(e) {
   switch (e.type) {
@@ -458,7 +471,7 @@ function renderLobby() {
   const isHost = lobby.hostId === session.id;
   $('members').replaceChildren(...lobby.members.map((m) => el('li', {},
     el('span', { class: 'dot', style: `background:${colorOf(m.id)}` }),
-    el('span', { class: 'piece', title: pieceOf(m.id).name }, pieceOf(m.id).emoji),
+    pieceIcon(pieceOf(m.id), colorOf(m.id)),
     el('span', { class: 'grow' }, m.name, m.id === session.id ? ' (you)' : ''),
     el('span', { class: 'tag' }, m.bot ? 'bot' : m.id === lobby.hostId ? 'host' : m.connected ? '' : 'offline'),
     isHost && m.id !== session.id ? el('button', { class: 'small', onclick: () => host('kick', m.id) }, 'Remove') : null,
@@ -490,7 +503,7 @@ function renderPiecePicker() {
         try { await roomApi('piece', { piece: p.key }); } catch (e) { $('lobby-error').textContent = e.message; }
       },
     },
-    el('span', { class: 'pick-emoji' }, p.emoji),
+    pieceIcon(p, owner ? colorOf(owner.id) : colorOf(session.id), 'pick-emoji'),
     el('span', { class: 'pick-name' }, p.name),
     takenByOther ? el('span', { class: 'pick-owner' }, owner.name) : null,
     isMine ? el('span', { class: 'pick-owner' }, 'You') : null);
@@ -676,7 +689,7 @@ function renderSide() {
     const canHandOver = isHost && m && !m.bot && !m.autoplay && !m.left && pl.id !== session.id && !pl.bankrupt;
     return el('li', { class: `${pl.id === cur().id ? 'turn' : ''}${pl.bankrupt ? ' out' : ''}`, 'data-flash': '' },
       el('span', { class: 'dot', style: `background:${colorOf(pl.id)}` }),
-      el('span', { class: 'piece', title: pieceOf(pl.id).name }, pieceOf(pl.id).emoji),
+      pieceIcon(pieceOf(pl.id), colorOf(pl.id)),
       el('span', { class: 'grow' }, pl.name, pl.id === session.id ? ' (you)' : '', pl.inJail ? ' 🔒' : ''),
       el('span', { class: 'tag' }, m?.bot ? 'bot' : m?.left ? 'left' : m?.autoplay ? 'bot playing' : offline ? 'offline' : ''),
       canHandOver ? el('button', {

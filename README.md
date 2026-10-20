@@ -16,9 +16,14 @@ roll and tokens hop square by square; your buttons appear once the move has
 played out. A **2D view** button switches to a flat board (also used
 automatically on devices without WebGL).
 
-**Pieces and camera:** in the lobby each player picks one of eight pieces (rubber duck, rocket,
-snowman, mushroom, robot, ice cream, cactus, UFO), shown in their colour; each piece can be taken once and they are defined
-in `public/pieces.js`. The camera (in the View menu) has **Overview**, **Top-down**,
+**Pieces and camera:** in the lobby each player picks one of sixteen pieces (rubber duck,
+rocket, snowman, mushroom, robot, ice cream, cactus, UFO, octopus, frog, burger, ghost,
+cupcake, money bag, teapot, hot-air balloon), shown as 3D pictures in their colour; each
+piece can be taken once. They are modelled in code in `public/pieces.js` (smooth shapes:
+surfaces of revolution, tubes along curves, rounded boxes) and merged into a few meshes
+each. On the board every piece has a pale glow in its player's colour (a little
+brighter for whoever's turn it is), and pieces sharing a square shrink a little so
+they don't bump into each other. The camera (in the View menu) has **Overview**, **Top-down**,
 **Follow player** (third-person, behind whoever's turn it is) and **Free cam**
 (drag to look, right/Shift-drag to move, scroll to zoom, WASD/arrows to fly, Q/E
 to turn, R/F to tilt, double-click to glide to a spot; on phones one finger

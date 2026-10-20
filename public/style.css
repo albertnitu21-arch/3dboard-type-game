@@ -627,3 +627,9 @@ body.full .panel-show {
   body.full .panel-show { top: 8px; right: 8px; }
   body.full .panel-show svg { transform: rotate(90deg); }
 }
+
+/* 3D pictures of the pieces (lobby picker and player lists) */
+.piece.piece-img { width: 26px; height: 26px; object-fit: contain; display: block; margin: -3px 0; }
+.pick-emoji.piece-img { width: 64px; height: 64px; object-fit: contain; display: block; }
+.pick:hover:not(:disabled) .pick-emoji.piece-img { transform: scale(1.1) rotate(-4deg); }
+@media (max-width: 420px) { .pick-emoji.piece-img { width: 54px; height: 54px; } }

@@ -79,7 +79,7 @@ export function rboxGeo(w, h, d, r, seg = 4, uvScale = null) {
 }
 
 /** Surface of revolution from a [radius, height] profile (bottom to top). */
-export function latheGeo(profile, seg = 32, uRepeat = 1) {
+export function latheGeo(profile, seg = 32, uRepeat = 1, a0 = 0, a1 = Math.PI * 2) {
   const pos = [], nor = [], uv = [], idx = [];
   const n = profile.length;
   const pn = profile.map((p, k) => {
@@ -93,7 +93,7 @@ export function latheGeo(profile, seg = 32, uRepeat = 1) {
   for (let k = 1; k < n; k++) lens.push(lens[k - 1] + Math.hypot(profile[k][0] - profile[k - 1][0], profile[k][1] - profile[k - 1][1]));
   const total = lens[n - 1] || 1;
   for (let i = 0; i <= seg; i++) {
-    const ang = (i / seg) * Math.PI * 2;
+    const ang = a0 + (i / seg) * (a1 - a0);
     const c = Math.cos(ang), s = Math.sin(ang);
     profile.forEach(([r, y], k) => {
       pos.push(r * c, y, r * s);
@@ -272,6 +272,95 @@ export function starfishGeo(arms = 5, R = 0.5, r = 0.2, thick = 0.12, seg = 80, 
   return g;
 }
 
+/**
+ * Parametric surface: fn(u, v) -> [x, y, z] with u, v in 0..1 over nu x nv cells.
+ * Normals point outwards for surfaces of revolution written as [sin(a) r, y, cos(a) r]
+ * with u around and v upwards.
+ */
+export function paramGeo(nu, nv, fn) {
+  const pos = [], uv = [], idx = [];
+  for (let j = 0; j <= nv; j++) {
+    for (let i = 0; i <= nu; i++) {
+      pos.push(...fn(i / nu, j / nv));
+      uv.push(i / nu, j / nv);
+    }
+  }
+  for (let j = 0; j < nv; j++) {
+    for (let i = 0; i < nu; i++) {
+      const a = j * (nu + 1) + i, b = a + 1, c = a + nu + 1, d = c + 1;
+      idx.push(a, b, c, b, d, c);
+    }
+  }
+  const g = { pos, nor: [], uv, idx };
+  computeNormals(g);
+  return g;
+}
+
+/**
+ * A tube swept along a path of points. radius: a number or (t in 0..1) => number.
+ * Ends are closed with flat caps unless the radius reaches 0 there.
+ */
+export function tubeGeo(path, radius, seg = 14) {
+  const rad = typeof radius === 'function' ? radius : () => radius;
+  const n = path.length;
+  const pos = [], uv = [], idx = [];
+  let N = null;
+  const rings = [];
+  for (let k = 0; k < n; k++) {
+    const a = path[Math.max(0, k - 1)], b = path[Math.min(n - 1, k + 1)];
+    const T = v3.norm(v3.sub(b, a));
+    if (!N) {
+      const ref = Math.abs(T[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
+      N = v3.norm(v3.cross(T, ref));
+    } else {
+      N = v3.norm(v3.sub(N, v3.scale(T, v3.dot(N, T))));
+    }
+    const B = v3.cross(T, N);
+    rings.push({ p: path[k], N, B, r: rad(k / (n - 1)) });
+  }
+  for (let k = 0; k < n; k++) {
+    const { p, N: nn, B, r } = rings[k];
+    for (let i = 0; i <= seg; i++) {
+      const a = (i / seg) * Math.PI * 2;
+      const d = v3.add(v3.scale(nn, Math.cos(a)), v3.scale(B, Math.sin(a)));
+      pos.push(...v3.add(p, v3.scale(d, r)));
+      uv.push(i / seg, k / (n - 1));
+    }
+  }
+  for (let k = 0; k < n - 1; k++) {
+    for (let i = 0; i < seg; i++) {
+      const a = k * (seg + 1) + i, b = a + 1, c = a + seg + 1, d = c + 1;
+      idx.push(a, b, c, b, d, c);
+    }
+  }
+  for (const [k, dir] of [[0, -1], [n - 1, 1]]) {
+    if (rings[k].r < 1e-4) continue;
+    const center = pos.length / 3;
+    pos.push(...rings[k].p); uv.push(0.5, k ? 1 : 0);
+    for (let i = 0; i < seg; i++) {
+      const a = k * (seg + 1) + i;
+      if (dir < 0) idx.push(center, a + 1, a); else idx.push(center, a, a + 1);
+    }
+  }
+  const g = { pos, nor: [], uv, idx };
+  computeNormals(g);
+  return g;
+}
+
+/** Points along a smooth curve through the given control points (Catmull-Rom). */
+export function curve(points, steps = 8) {
+  const out = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[Math.max(0, i - 1)], p1 = points[i], p2 = points[i + 1], p3 = points[Math.min(points.length - 1, i + 2)];
+    for (let s = 0; s < steps; s++) {
+      const t = s / steps, t2 = t * t, t3 = t2 * t;
+      out.push([0, 1, 2].map((k) => 0.5 * ((2 * p1[k]) + (-p0[k] + p2[k]) * t + (2 * p0[k] - 5 * p1[k] + 4 * p2[k] - p3[k]) * t2 + (-p0[k] + 3 * p1[k] - 3 * p2[k] + p3[k]) * t3)));
+    }
+  }
+  out.push(points[points.length - 1]);
+  return out;
+}
+
 /** Smooth normals from the triangles; vertices at the same spot share a normal (no seams). */
 export function computeNormals(g) {
   const n = g.pos.length / 3;
@@ -285,7 +374,8 @@ export function computeNormals(g) {
     for (const v of [a, b, c]) { acc[v * 3] += fn[0]; acc[v * 3 + 1] += fn[1]; acc[v * 3 + 2] += fn[2]; }
   }
   // weld normals of vertices that sit at the same position
-  const key = (i) => `${g.pos[i * 3].toFixed(4)},${g.pos[i * 3 + 1].toFixed(4)},${g.pos[i * 3 + 2].toFixed(4)}`;
+  const r = (x) => Math.round(x * 1e4) || 0; // (|| 0 turns -0 into 0 so seams weld)
+  const key = (i) => `${r(g.pos[i * 3])},${r(g.pos[i * 3 + 1])},${r(g.pos[i * 3 + 2])}`;
   const groups = new Map();
   for (let i = 0; i < n; i++) {
     const k = key(i);

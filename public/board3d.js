@@ -12,8 +12,8 @@
 import { pieceFor } from './pieces.js';
 import { bgByKey, drawTableTile } from './backgrounds.js';
 import { sfx } from './sounds.js';
-import { v3, quat, trs, mul4, perspective, ortho, lookAt, lerp, easeOut, easeInOut, hexToRgb, normalMat } from './math3d.js';
-import { boxGeo, latheGeo, roofGeo, planeGeo, sphereGeo, cylGeo, coneGeo, torusGeo, rboxGeo, discGeo } from './geometry.js';
+import { v3, quat, trs, mul4, perspective, ortho, lookAt, lerp, easeOut, easeInOut, hexToRgb, normalMat, xformPoint } from './math3d.js';
+import { boxGeo, latheGeo, roofGeo, planeGeo, sphereGeo, cylGeo, coneGeo, torusGeo, rboxGeo, discGeo, merge } from './geometry.js';
 import { TEXTURES } from './textures.js';
 import { SCENES, DEFAULT_LIGHT } from './scenes.js';
 
@@ -439,7 +439,7 @@ uniform float uLit; uniform float uSpec; uniform vec3 uLight; uniform vec3 uEye;
 uniform vec3 uSky; uniform vec3 uGround; uniform vec3 uSun;
 uniform vec3 uPointPos; uniform vec3 uPointCol; uniform float uPointRange;
 uniform sampler2D uShadow; uniform float uShadowOn; uniform float uTexel; uniform float uBias;
-uniform vec3 uFogCol; uniform vec2 uFog; uniform float uAlphaTest; uniform float uEmit;
+uniform vec3 uFogCol; uniform vec2 uFog; uniform float uAlphaTest; uniform float uEmit; uniform vec4 uRim;
 float unpack(vec4 c) { return dot(c, vec4(1.0, 1.0 / 255.0, 1.0 / 65025.0, 1.0 / 16581375.0)); }
 float shadowAt(vec3 p, float ndl) {
   float bias = uBias * (1.0 + 3.0 * (1.0 - ndl));
@@ -447,7 +447,7 @@ float shadowAt(vec3 p, float ndl) {
   float s = 0.0;
   for (int i = -1; i <= 1; i++) {
     for (int j = -1; j <= 1; j++) {
-      float d = unpack(texture2D(uShadow, p.xy + vec2(float(i), float(j)) * uTexel));
+      float d = unpack(texture2D(uShadow, p.xy + vec2(float(i), float(j)) * uTexel * 1.6));
       s += p.z - bias > d ? 0.0 : 1.0;
     }
   }
@@ -475,6 +475,8 @@ void main() {
     vec3 h = normalize(uLight + v);
     float spec = pow(max(dot(n, h), 0.0), 48.0) * uSpec * sh;
     c.rgb = c.rgb * light + spec * uSun * 1.9;
+    // soft glow along the edges (used for the player pieces)
+    if (uRim.a > 0.0) c.rgb += uRim.rgb * pow(1.0 - max(dot(n, v), 0.0), 2.2) * uRim.a;
   }
   c.rgb *= 1.0 + uEmit;
   if (uFog.y > 0.0) c.rgb = mix(c.rgb, uFogCol, smoothstep(uFog.x, uFog.y, length(vW - uEye)) * 0.85);
@@ -540,7 +542,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   const U = {};
   for (const n of ['uVP', 'uModel', 'uNormal', 'uTex', 'uUseTex', 'uColor', 'uLit', 'uSpec', 'uLight', 'uEye', 'uFade',
     'uSky', 'uGround', 'uSun', 'uPointPos', 'uPointCol', 'uPointRange', 'uShadow', 'uShadowOn', 'uTexel', 'uLVP',
-    'uFogCol', 'uFog', 'uAlphaTest', 'uEmit', 'uBias']) U[n] = gl.getUniformLocation(prog, n);
+    'uFogCol', 'uFog', 'uAlphaTest', 'uEmit', 'uBias', 'uRim']) U[n] = gl.getUniformLocation(prog, n);
   gl.enable(gl.DEPTH_TEST);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   const uintIdx = gl.getExtension('OES_element_index_uint');
@@ -625,6 +627,16 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   const shadowTex = texture(radialTexture('rgba(0,0,0,0.55)', 'rgba(0,0,0,0)'));
   const cardTex = texture(drawCardBacks());
   const glowTex = texture(radialTexture('rgba(255,255,255,1)', 'rgba(255,255,255,0)'));
+  const haloTex = texture((() => {
+    // a soft round glow that fades out smoothly (roughly a Gaussian)
+    const cnv = document.createElement('canvas');
+    cnv.width = cnv.height = 128;
+    const g = cnv.getContext('2d');
+    const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+    for (let i = 0; i <= 10; i++) { const r = i / 10; grad.addColorStop(r, `rgba(255,255,255,${(Math.exp(-r * r * 4.5) - Math.exp(-4.5)).toFixed(3)})`); }
+    g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
+    return cnv;
+  })());
   // the table under the board: a repeating tile, one tile every 6 units
   const TABLE = 90;
   let background = bgByKey('classic');
@@ -845,23 +857,54 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   const dropIn = (t) => ({ s: 0.55 + 0.45 * Math.min(1, t * 1.6), dy: (1 - easeOutBounce(t)) * 1.3 });
   const fadeOut = (t) => ({ s: Math.max(0, 1 - t), dy: t * 0.35 });
 
-  const pieceColors = new Map();
+  // Each piece is built once and merged into a few meshes: fixed colours, the
+  // player's colour and a darker shade of it (grouped by shininess and glow).
+  const PIECE_SCALE = 1.05;
+  const pieceGroups = new Map();
+  function pieceMesh(piece) {
+    let groups = pieceGroups.get(piece.key);
+    if (groups) return groups;
+    const by = new Map();
+    const box = { lo: [1e9, 1e9, 1e9], hi: [-1e9, -1e9, -1e9] };
+    for (const p of piece.build()) {
+      for (let i = 0; i < p.geo.pos.length; i += 9) { // every third vertex is plenty for a bounding box
+        const q = xformPoint(p.m, [p.geo.pos[i], p.geo.pos[i + 1], p.geo.pos[i + 2]]);
+        for (let k = 0; k < 3; k++) { box.lo[k] = Math.min(box.lo[k], q[k]); box.hi[k] = Math.max(box.hi[k], q[k]); }
+      }
+      const kind = p.color === 'P' || p.color === 'D' ? p.color : 'F';
+      const key = `${kind}|${p.spec}|${p.emit}`;
+      if (!by.has(key)) by.set(key, { kind, spec: p.spec, emit: p.emit, parts: [] });
+      by.get(key).parts.push({ geo: p.geo, m: p.m, color: kind === 'F' ? p.color : [1, 1, 1] });
+    }
+    groups = [...by.values()].map((g) => ({ kind: g.kind, spec: g.spec, emit: g.emit, mesh: mesh(merge(g.parts)) }));
+    groups.box = box;
+    pieceGroups.set(piece.key, groups);
+    return groups;
+  }
+  const WHITE = [1, 1, 1];
+  function drawPieceAt(piece, model, color, rim = 0.32) {
+    const dark = color.map((c) => c * 0.62);
+    if (pass === 'main') gl.uniform4f(U.uRim, color[0], color[1], color[2], rim);
+    for (const g of pieceMesh(piece)) {
+      // small things use soft contact shadows; the scene's shadow map is too coarse for them
+      draw(g.mesh, model, g.kind === 'P' ? color : g.kind === 'D' ? dark : WHITE, null, { spec: g.spec, emit: g.emit, cast: false });
+    }
+    if (pass === 'main') gl.uniform4f(U.uRim, 0, 0, 0, 0);
+  }
   function drawPiece(id, t) {
     const piece = pieceOf(id);
-    // pieces were designed on a 0.035-high base; without it, lower them onto the board
-    const base = trs([t.x, t.lift - 0.035 * 1.15, t.z], quat.axis([0, 1, 0], t.yaw ?? 0), 1.15);
-    const dark = t.color.map((c) => c * 0.62);
-    for (const [shape, at, sc, col, rot] of piece.parts) {
-      let c;
-      if (col === 'P') c = t.color;
-      else if (col === 'D') c = dark;
-      else {
-        c = pieceColors.get(col);
-        if (!c) { c = hexToRgb(col); pieceColors.set(col, c); }
-      }
-      const q = rot ? quat.axis([rot[0], rot[1], rot[2]], rot[3]) : undefined;
-      draw(M[shape], mul4(base, trs(at, q, sc)), c, null, { spec: 0.45 });
-    }
+    drawPieceAt(piece, trs([t.x, t.lift, t.z], quat.axis([0, 1, 0], t.yaw ?? 0), PIECE_SCALE * (piece.scale ?? 1) * (t.cs ?? 1)), t.color);
+  }
+  /** A pale glow in the player's colour behind a piece, so it stands out on the board. */
+  function halo(c, t, strong) {
+    const size = 1.2 * PIECE_SCALE * (t.cs ?? 1);
+    const z = c.view.z;
+    const k = t.cs ?? 1;
+    const pos = [t.x - z[0] * 0.18 * k, t.lift + 0.3 * k - z[1] * 0.18 * k, t.z - z[2] * 0.18 * k];
+    const r = c.view.x, u = c.view.y;
+    const m = [r[0] * size, r[1] * size, r[2] * size, 0, z[0], z[1], z[2], 0, u[0] * size, u[1] * size, u[2] * size, 0, pos[0], pos[1], pos[2], 1];
+    const col = t.color.map((v) => Math.min(1, v * 0.75 + 0.3)); // lighter, so it reads as light
+    draw(M.plane, m, [...col, strong ? 0.5 : 0.32], haloTex, { lit: false });
   }
 
   /** Direction a piece faces on each side of the board (yaw that turns +z that way). */
@@ -983,6 +1026,19 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     setBlend(false);
   }
 
+  /** Pieces sharing a square shrink a little so they don't bump into each other. */
+  function updateCrowding() {
+    const count = new Map();
+    const where = (t) => `${t.pos}|${t.inJail ? 1 : 0}`;
+    for (const t of tokens.values()) if (t.visible && t.lift < 0.05) count.set(where(t), (count.get(where(t)) ?? 0) + 1);
+    for (const t of tokens.values()) {
+      const n = t.lift < 0.05 ? count.get(where(t)) ?? 1 : 1;
+      const want = n <= 1 ? 1 : n === 2 ? 0.9 : n <= 4 ? 0.8 : 0.72;
+      t.cs = t.cs ?? want;
+      if (Math.abs(t.cs - want) > 0.004) { t.cs += (want - t.cs) * 0.2; dirty = true; } else t.cs = want;
+    }
+  }
+
   /** Everything solid: scenery, board, buildings, pieces, dice, card piles. */
   function drawOpaque(c) {
     drawBackdrop(c);
@@ -995,27 +1051,27 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
       const sc = (v) => v.map((x) => x * b.s);
       const y = (v) => v * b.s + b.dy;
       if (b.hotel) {
-        draw(M.box, trs([b.at[0], y(0.085), b.at[1]], q, sc([0.44, 0.17, 0.18])), [0.8, 0.2, 0.16], null, { spec: 0.25 });
-        draw(M.roof, trs([b.at[0], y(0.17), b.at[1]], q, sc([0.47, 0.09, 0.2])), [0.58, 0.12, 0.1], null, { spec: 0.2 });
-        draw(M.box, trs([b.at[0], y(0.085), b.at[1]], q, sc([0.08, 0.1, 0.185])), [0.95, 0.88, 0.62], null, { spec: 0.1 });
+        draw(M.box, trs([b.at[0], y(0.085), b.at[1]], q, sc([0.44, 0.17, 0.18])), [0.8, 0.2, 0.16], null, { spec: 0.25, cast: false });
+        draw(M.roof, trs([b.at[0], y(0.17), b.at[1]], q, sc([0.47, 0.09, 0.2])), [0.58, 0.12, 0.1], null, { spec: 0.2, cast: false });
+        draw(M.box, trs([b.at[0], y(0.085), b.at[1]], q, sc([0.08, 0.1, 0.185])), [0.95, 0.88, 0.62], null, { spec: 0.1, cast: false });
       } else {
-        draw(M.box, trs([b.at[0], y(0.055), b.at[1]], q, sc([0.15, 0.11, 0.15])), [0.2, 0.64, 0.34], null, { spec: 0.25 });
-        draw(M.roof, trs([b.at[0], y(0.11), b.at[1]], q, sc([0.175, 0.08, 0.17])), [0.11, 0.42, 0.22], null, { spec: 0.2 });
+        draw(M.box, trs([b.at[0], y(0.055), b.at[1]], q, sc([0.15, 0.11, 0.15])), [0.2, 0.64, 0.34], null, { spec: 0.25, cast: false });
+        draw(M.roof, trs([b.at[0], y(0.11), b.at[1]], q, sc([0.175, 0.08, 0.17])), [0.11, 0.42, 0.22], null, { spec: 0.2, cast: false });
       }
     }
     for (const [id, t] of tokens) {
       if (!t.visible) continue;
       drawPiece(id, t);
     }
-    for (const d of dice) draw(M.die, trs(d.p, d.q), [1, 1, 1], diceTex, { spec: 0.35 });
+    for (const d of dice) draw(M.die, trs(d.p, d.q), [1, 1, 1], diceTex, { spec: 0.35, cast: false });
     for (const deck of ['fortune', 'community']) {
       const n = Math.max(state?.deckSizes?.[deck] ?? 16, 1) - (flying?.deck === deck ? 1 : 0);
       if (n <= 0) continue;
       const h = n * CARD_T;
       const pl = PILE[deck];
-      draw(M.card[deck], trs([pl.at[0], h / 2, pl.at[1]], quat.axis([0, 1, 0], pl.yaw), [CARD_W, h, CARD_D]), [1, 1, 1], cardTex, { spec: 0.15 });
+      draw(M.card[deck], trs([pl.at[0], h / 2, pl.at[1]], quat.axis([0, 1, 0], pl.yaw), [CARD_W, h, CARD_D]), [1, 1, 1], cardTex, { spec: 0.15, cast: false });
     }
-    if (flying) draw(M.card[flying.deck], trs(flying.p, flying.q, [CARD_W, CARD_T * 1.5, CARD_D]), [1, 1, 1], cardTex, { spec: 0.3 });
+    if (flying) draw(M.card[flying.deck], trs(flying.p, flying.q, [CARD_W, CARD_T * 1.5, CARD_D]), [1, 1, 1], cardTex, { spec: 0.3, cast: false });
     return buildings;
   }
 
@@ -1094,8 +1150,9 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     }
     setBlend(false);
     gl.depthMask(true);
+    updateCrowding();
     const buildings = drawOpaque(c);
-    const blobK = useShadow ? 0.6 : 1; // contact shadows are softer when real shadows are on
+    const blobK = 1; // pieces, dice and houses only have these soft contact shadows
 
     // transparent: shadows, rings, selection
     setBlend(true);
@@ -1105,6 +1162,11 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
       const s = 0.42 * (1 + t.lift * 0.4);
       draw(M.plane, trs([t.x + 0.03, 0.003, t.z + 0.03], undefined, [s, 1, s]), [1, 1, 1, blobK / (1 + t.lift * 1.5)], shadowTex, { lit: false });
     }
+    // pale glow around each piece (a little brighter for whoever's turn it is)
+    setBlend(true, true);
+    const current = state && !state.winner ? state.players[state.current]?.id : null;
+    for (const [id, t] of tokens) if (t.visible) halo(c, t, id === current);
+    setBlend(true);
     for (const d of dice) {
       const s = DIE * 1.6 * (1 + (d.p[1] - DIE / 2) * 0.35);
       draw(M.plane, trs([d.p[0] + 0.06, 0.003, d.p[2] + 0.06], undefined, [s, 1, s]), [1, 1, 1, 0.9 * blobK / (1 + (d.p[1] - DIE / 2) * 0.8)], shadowTex, { lit: false });
@@ -1704,6 +1766,73 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
   api.background = () => background.key;
   /** How many scenery textures are still being painted (for tests). */
   api.texturesPending = () => texQueue.length + (texTimer ? 1 : 0);
+
+  /** Render a piece as a picture (data URL) for menus, in the given colour. */
+  let thumbTarget = null;
+  api.pieceThumbnail = (piece, hex, size = 128) => {
+    const S = size * 2; // draw at double size, then shrink for smooth edges
+    if (!thumbTarget || thumbTarget.size !== S) {
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, S, S, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      const depth = gl.createRenderbuffer();
+      gl.bindRenderbuffer(gl.RENDERBUFFER, depth);
+      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, S, S);
+      const fbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth);
+      thumbTarget = { fbo, size: S };
+    }
+    // the target texture must not stay bound while we draw into it
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, thumbTarget.fbo);
+    gl.viewport(0, 0, S, S);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    // frame the whole model: aim at its middle, back off far enough for its size
+    const { lo, hi } = pieceMesh(piece).box;
+    const sc = piece.scale ?? 1;
+    const h = (hi[1] - Math.min(lo[1], 0)) * sc;
+    const w = Math.max(hi[0] - lo[0], hi[2] - lo[2]) * sc;
+    const d = Math.max(h * 1.05, w * 0.95) / Math.tan((15 * Math.PI) / 180) * 0.62 + 0.15;
+    const dir = v3.norm([0.42, 0.52, 0.85]);
+    const target = [0, h * 0.47, 0];
+    const eye = v3.add(target, v3.scale(dir, d));
+    const view = lookAt(eye, target);
+    gl.uniformMatrix4fv(U.uVP, false, mul4(perspective((30 * Math.PI) / 180, 1, 0.05, 20), view.m));
+    gl.uniform3fv(U.uEye, eye);
+    gl.uniform3fv(U.uLight, v3.norm([0.5, 1, 0.8]));
+    gl.uniform3fv(U.uSky, [0.6, 0.6, 0.62]);
+    gl.uniform3fv(U.uGround, [0.42, 0.4, 0.4]);
+    gl.uniform3fv(U.uSun, [0.55, 0.54, 0.52]);
+    gl.uniform1f(U.uPointRange, 0);
+    gl.uniform2f(U.uFog, 0, 0);
+    gl.uniform2f(U.uFade, 0, 0);
+    gl.uniform1f(U.uShadowOn, 0);
+    gl.enableVertexAttribArray(A.pos); gl.enableVertexAttribArray(A.nor); gl.enableVertexAttribArray(A.uv);
+    setBlend(false);
+    gl.depthMask(true);
+    drawPieceAt(piece, trs([0, 0, 0], quat.axis([0, 1, 0], piece.thumbYaw ?? 0.35), sc), hexToRgb(hex), 0.25);
+    const px = new Uint8Array(S * S * 4);
+    gl.readPixels(0, 0, S, S, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    dirty = true;
+    const big = document.createElement('canvas');
+    big.width = big.height = S;
+    const bg = big.getContext('2d');
+    const img = bg.createImageData(S, S);
+    for (let y = 0; y < S; y++) img.data.set(px.subarray((S - 1 - y) * S * 4, (S - y) * S * 4), y * S * 4);
+    bg.putImageData(img, 0, 0);
+    const out = document.createElement('canvas');
+    out.width = out.height = size;
+    const og = out.getContext('2d');
+    og.imageSmoothingQuality = 'high';
+    og.drawImage(big, 0, 0, size, size);
+    return out.toDataURL('image/png');
+  };
 
   api.destroy = () => {
     cancelAnimationFrame(rafId);
