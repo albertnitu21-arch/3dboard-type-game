@@ -18,7 +18,7 @@ automatically on devices without WebGL).
 
 **Pieces and camera:** in the lobby each player picks one of eight pieces (rubber duck, rocket,
 snowman, mushroom, robot, ice cream, cactus, UFO), shown in their colour; each piece can be taken once and they are defined
-in `public/pieces.js`. The 🎥 camera menu has **Overview**, **Top-down**,
+in `public/pieces.js`. The camera (in the View menu) has **Overview**, **Top-down**,
 **Follow player** (third-person, behind whoever's turn it is) and **Free cam**
 (drag to look, right/Shift-drag to move, scroll to zoom, WASD/arrows to fly, Q/E
 to turn, R/F to tilt, double-click to glide to a spot; on phones one finger
@@ -40,10 +40,12 @@ a pop-up with who drew it and what it says.
 small bar at the bottom of the board, with Auto roll / Auto end switches. The
 board is framed so the bar never covers it, on computers and phones.
 
-**Fullscreen and backgrounds:** **▣ Fill window** makes the board fill the
-browser window while keeping the tabs and address bar; **⛶ Fullscreen** fills the
-whole screen (and hides the browser bars where the browser allows); the side
-panel floats on top and can be hidden. The 🎨 menu picks where the game is played:
+**The View menu:** one **View** button in the board's corner opens a menu (a drop-down on
+computers, a sheet from the bottom on phones) with the camera modes, picture cards
+for every scene, and switches for **Fill window** (board fills the browser window,
+tabs stay), **Fullscreen**, the side panel, sounds and the 3D/flat board. In fill
+window and fullscreen the side panel floats on top; the arrow on it hides it and a
+**Players** button brings it back. The scenes are:
 
 - **3D scenes** (`public/scenes.js`): Living room (a coffee table just bigger than
   the board, sofa, armchair, bookshelf, window, sleeping cat), Beach (umbrella,
@@ -106,6 +108,7 @@ server/
   game-server.js  HTTP API + live updates + static files
 public/     web client
   app.js      lobby, side panel, animation queue, card pop-up, 2D fallback board
+  viewmenu.js the View menu (camera, scene, screen options)
   trade.js    trade window (title-deed cards, live offer, incoming offers)
   board3d.js  3D board on plain WebGL: board texture, tokens, houses, dice, camera, shadows
   scenes.js   3D scenery for each background (living room, beach, casino...)

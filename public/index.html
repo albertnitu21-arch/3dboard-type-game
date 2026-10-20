@@ -47,27 +47,11 @@
           <canvas id="board-canvas" aria-label="3D game board. Drag to rotate, scroll or pinch to zoom, tap a space for details."></canvas>
         </div>
         <div id="board" class="board" aria-label="Game board" hidden></div>
-        <div class="board-tools">
-          <label class="cam-select" title="Camera">
-            <span aria-hidden="true">🎥</span>
-            <select id="cam-mode" aria-label="Camera">
-              <option value="overview">Overview</option>
-              <option value="top">Top-down</option>
-              <option value="follow">Follow player</option>
-              <option value="free">Free cam</option>
-            </select>
-          </label>
-          <label class="cam-select" title="Background">
-            <span aria-hidden="true">🎨</span>
-            <select id="bg-mode" aria-label="Background"></select>
-          </label>
-          <button id="reset-view" class="small" title="Reset camera" data-icon="⟲">Reset view</button>
-          <button id="toggle-view" class="small" data-icon="2D">2D view</button>
-          <button id="panel-toggle" class="small" type="button" data-icon="☰" hidden>Hide panel</button>
-          <button id="sound-toggle" class="small" type="button" title="Sound on/off" aria-pressed="true">🔊</button>
-          <button id="fill-window" class="small" type="button" data-icon="▣" title="Board fills the browser window (tabs and address bar stay visible)" aria-pressed="false">▣ Fill window</button>
-          <button id="fullscreen" class="small" type="button" data-icon="⛶" title="Fill the whole screen with the board" aria-pressed="false">⛶ Fullscreen</button>
-        </div>
+        <!-- one button opens the view menu: camera, scene and screen options -->
+        <button id="view-btn" class="view-fab" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="view-menu" title="Camera, scene and screen">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></svg>
+          <span>View</span>
+        </button>
         <!-- your moves (roll, buy, end turn...) float over the board -->
         <div id="dock" class="dock" hidden>
           <div id="dock-status" class="dock-status"></div>
@@ -79,6 +63,9 @@
         </div>
       </div>
       <aside class="side">
+        <button id="panel-hide" class="panel-hide" type="button" title="Hide this panel" aria-label="Hide the side panel">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
         <div id="away-bar" class="away-bar" hidden></div>
         <div id="status" class="status"></div>
         <p id="game-error" class="error" role="alert"></p>
@@ -95,12 +82,18 @@
           <button>Send</button>
         </form>
       </aside>
+      <button id="panel-show" class="panel-show" type="button" title="Show the side panel" aria-label="Show the side panel" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+        <span>Players</span>
+      </button>
       <div class="game-menu">
         <button id="leave-game" class="small ghost" type="button">Leave game</button>
         <button id="restart-game" class="small ghost" type="button" hidden>Back to lobby</button>
       </div>
     </section>
   </main>
+  <div id="view-backdrop" class="view-backdrop" hidden></div>
+  <div id="view-menu" class="view-menu" role="dialog" aria-modal="false" aria-labelledby="vm-title" hidden></div>
   <div id="trade-modal" class="overlay" hidden></div>
   <div id="card-popup" class="overlay card-overlay" hidden></div>
   <script type="module" src="app.js"></script>

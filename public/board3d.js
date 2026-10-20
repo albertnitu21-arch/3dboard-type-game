@@ -753,7 +753,7 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     const fov = (38 * Math.PI) / 180;
     const th = Math.tan(fov / 2);
     const tv = th * (1 - lensShiftY()); // the part of the height not covered by the buttons
-    return Math.min(Math.max(6.7 / (th * aspect), 5.6 / tv, 9), 34);
+    return Math.min(Math.max((aspect < 0.8 ? 7.4 : 6.7) / (th * aspect), 5.6 / tv, 9), 40);
   }
   function camera() {
     const target = cam.target ?? [0, 0, 0.35];

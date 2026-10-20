@@ -7,7 +7,8 @@ import { createBoard3D } from './board3d.js';
 import { createTradeUI } from './trade.js';
 import { createMoneyUI } from './money.js';
 import { PIECES, pieceFor, pieceByKey } from './pieces.js';
-import { BACKGROUNDS } from './backgrounds.js';
+import { BACKGROUNDS, drawTableTile } from './backgrounds.js';
+import { createViewMenu } from './viewmenu.js';
 import { sfx, soundOn, setSound } from './sounds.js';
 
 const $ = (id) => document.getElementById(id);
@@ -97,6 +98,7 @@ function resetGameView() {
 }
 
 function leaveRoom(message = '') {
+  viewMenu.close();
   fullMode = null;
   setFull(false);
   source?.close();
@@ -438,13 +440,7 @@ function render() {
   if (!session || !lobby) return;
   if (!lobby.started || !game) return renderLobby();
   show('game');
-  $('toggle-view').hidden = !board3d;
-  $('toggle-view').textContent = use3d ? '2D view' : '3D view';
-  $('toggle-view').dataset.icon = use3d ? '2D' : '3D';
-  $('reset-view').hidden = !use3d;
-  $('cam-mode').closest('.cam-select').hidden = !use3d;
-  $('bg-mode').closest('.cam-select').hidden = !use3d;
-  if (board3d) $('cam-mode').value = board3d.mode();
+  viewMenu.sync();
   if (use3d) board3d.sync(game.state);
   else renderBoard();
   renderSide();
@@ -625,7 +621,7 @@ function scheduleAutoEnd() { autoEnd.schedule(); autoRoll.schedule(); }
 function stopAutoEnd() { autoEnd.stop(); autoRoll.stop(); }
 // Doing something with your properties restarts the countdowns.
 document.addEventListener('pointerdown', (e) => {
-  if (e.target.closest?.('#mine, #trade-banner, .board-tools')) { autoEnd.restart(); autoRoll.restart(); }
+  if (e.target.closest?.('#mine, #trade-banner, .view-fab, .view-menu')) { autoEnd.restart(); autoRoll.restart(); }
 }, true);
 
 function renderSide() {
@@ -787,14 +783,11 @@ $('join').onclick = () => homeAction((name) => {
   return api(`/api/rooms/${code}/join`, { name });
 });
 $('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('join').click(); });
-$('toggle-view').onclick = () => setView(!use3d);
-$('reset-view').onclick = () => board3d?.resetView();
-$('cam-mode').onchange = (e) => {
+function setCamera(mode) {
   if (!board3d) return;
-  board3d.setMode(e.target.value);
-  try { localStorage.setItem('estate-cam', e.target.value); } catch { /* ignore */ }
-  e.target.blur(); // so W/A/S/D fly the camera instead of changing the menu
-};
+  board3d.setMode(mode);
+  try { localStorage.setItem('estate-cam', mode); } catch { /* ignore */ }
+}
 try {
   const savedCam = localStorage.getItem('estate-cam');
   if (board3d && savedCam) board3d.setMode(savedCam);
@@ -813,14 +806,11 @@ $('restart-game').onclick = () => {
 };
 // ------------------------------------------------------- background + fullscreen
 
-$('bg-mode').replaceChildren(...BACKGROUNDS.map((b) => el('option', { value: b.key }, `${b.name}`)));
 function setBackground(key) {
   if (!board3d) return;
   board3d.setBackground(key);
-  $('bg-mode').value = board3d.background();
   try { localStorage.setItem('estate-bg', board3d.background()); } catch { /* ignore */ }
 }
-$('bg-mode').onchange = (e) => { setBackground(e.target.value); e.target.blur(); };
 try { setBackground(localStorage.getItem('estate-bg') || 'classic'); } catch { setBackground('classic'); }
 
 let realFullscreen = false;
@@ -830,12 +820,7 @@ function setFull(on, real = true) {
   const was = document.body.classList.contains('full');
   document.body.classList.toggle('full', on);
   if (!was) document.body.classList.remove('panel-hidden');
-  $('fullscreen').textContent = on && real ? '✕ Exit fullscreen' : '⛶ Fullscreen';
-  $('fullscreen').setAttribute('aria-pressed', String(on && real));
-  $('fill-window').textContent = on && !real ? '✕ Exit fill window' : '▣ Fill window';
-  $('fill-window').setAttribute('aria-pressed', String(on && !real));
-  $('panel-toggle').hidden = !on;
-  $('panel-toggle').textContent = document.body.classList.contains('panel-hidden') ? 'Show panel' : 'Hide panel';
+  syncPanelButtons();
   requestAnimationFrame(updateViewInset);
   if (on && real && !document.fullscreenElement) {
     // also hide the browser's own bars where allowed (not on every phone)
@@ -854,9 +839,22 @@ function setFull(on, real = true) {
   if (!on) realFullscreen = false;
 }
 let fullMode = null; // null | 'screen' | 'window'
-function toggleFull(mode) {
-  fullMode = fullMode === mode ? null : mode;
+/** mode: 'window' (fill the browser window), 'screen' (real fullscreen) or null. */
+function setFullMode(mode) {
+  fullMode = mode;
   setFull(!!fullMode, fullMode === 'screen');
+  viewMenu.sync();
+}
+function setPanelShown(shown) {
+  document.body.classList.toggle('panel-hidden', !shown);
+  syncPanelButtons();
+  updateViewInset();
+  viewMenu.sync();
+}
+function syncPanelButtons() {
+  const full = document.body.classList.contains('full');
+  const hidden = document.body.classList.contains('panel-hidden');
+  $('panel-show').hidden = !(full && hidden);
 }
 function updateViewInset() {
   if (!board3d) return;
@@ -871,35 +869,49 @@ function updateViewInset() {
 }
 addEventListener('resize', updateViewInset);
 updateViewInset();
-$('fullscreen').onclick = () => toggleFull('screen');
-$('fill-window').onclick = () => toggleFull('window');
-$('panel-toggle').onclick = () => {
-  const hidden = document.body.classList.toggle('panel-hidden');
-  $('panel-toggle').textContent = hidden ? 'Show panel' : 'Hide panel';
-  updateViewInset();
-};
+$('panel-hide').onclick = () => setPanelShown(false);
+$('panel-show').onclick = () => setPanelShown(true);
 document.addEventListener('fullscreenchange', () => {
   // Esc in the browser's fullscreen also leaves our full-page view
-  if (!document.fullscreenElement && realFullscreen) { realFullscreen = false; fullMode = null; setFull(false); }
+  if (!document.fullscreenElement && realFullscreen) { realFullscreen = false; setFullMode(null); }
 });
 addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && document.body.classList.contains('full')
-    && $('trade-modal').hidden && $('card-popup').hidden) { fullMode = null; setFull(false); }
+    && $('trade-modal').hidden && $('card-popup').hidden) setFullMode(null);
 });
 
 // ----------------------------------------------------------------- sound
 
-function paintSoundButton() {
-  $('sound-toggle').textContent = soundOn() ? '🔊' : '🔇';
-  $('sound-toggle').setAttribute('aria-pressed', String(soundOn()));
-  $('sound-toggle').title = soundOn() ? 'Sound on (click to mute)' : 'Sound off (click to turn on)';
-}
-$('sound-toggle').onclick = () => { setSound(!soundOn()); paintSoundButton(); };
-paintSoundButton();
+// ------------------------------------------------------------ view menu
+
+const thumbs = new Map();
+const viewMenu = createViewMenu({
+  root: $('view-menu'),
+  backdrop: $('view-backdrop'),
+  button: $('view-btn'),
+  backgrounds: BACKGROUNDS,
+  thumb: (bg) => {
+    if (!thumbs.has(bg.key)) thumbs.set(bg.key, drawTableTile(bg, 96).toDataURL());
+    return thumbs.get(bg.key);
+  },
+  get: () => ({
+    use3d, has3d: !!board3d, camMode: board3d?.mode() ?? 'overview', bg: board3d?.background() ?? 'classic',
+    full: fullMode, panelHidden: document.body.classList.contains('panel-hidden'), sound: soundOn(),
+  }),
+  act: {
+    setCam: setCamera,
+    resetCam: () => board3d?.resetView(),
+    setBg: setBackground,
+    setFull: setFullMode,
+    setPanel: setPanelShown,
+    setSound,
+    set3d: (on) => setView(on),
+  },
+});
 // a soft click for buttons and menus
 document.addEventListener('click', (e) => {
   const b = e.target.closest?.('button, .pick, .chip, summary');
-  if (b && !b.disabled && b.id !== 'sound-toggle') sfx.click();
+  if (b && !b.disabled && b.dataset?.tile !== 'sound') sfx.click();
 }, true);
 document.addEventListener('change', (e) => { if (e.target.matches?.('select, input[type=checkbox]')) sfx.click(); }, true);
 
