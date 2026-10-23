@@ -37,6 +37,14 @@ note when a trade would complete a colour set. The other player gets the same
 visual offer with Accept, Decline or Counter-offer. Unanswered offers expire
 after 60 seconds so the game never gets stuck.
 
+**Raising money:** when you owe more than you have, the **Raise money** panel opens
+by itself (also from the move bar, or **Sell / mortgage several…** in My properties on
+your turn). Tap houses and hotels to sell them; anything that has to go first to keep
+the set even is marked too, and a hotel counts as the hotel plus its four houses. Tap
+properties to mortgage them (a set's buildings are sold first). A running total shows
+what you owe, your cash and what the plan raises; **✨ Pick for me** chooses the
+cheapest way to cover the debt. One button does it all and can pay the debt right away.
+
 **Cards:** Fortune and Community Fund cards sit in two piles in the middle of the
 board. When someone draws one, the top card lifts off the pile and everyone sees
 a pop-up with who drew it and what it says.
@@ -174,7 +182,9 @@ later only means replacing `game-server.js`.
 | `trade` | partner / proposer | `accept_trade`, `decline_trade` / `cancel_trade` |
 
 Management (own turn): `build {pos}`, `sell_building {pos}`, `mortgage {pos}`,
-`unmortgage {pos}`, `propose_trade {to, give: {cash, props, jailCards}, get: {…}}`.
+`unmortgage {pos}`, `propose_trade {to, give: {cash, props, jailCards}, get: {…}}`,
+`raise_cash {sell: {group: count}, mortgage: [pos], pay}` (many sales and mortgages
+at once, all or nothing; `previewRaise()` in the engine shows the result first).
 
 ## Rules implemented
 

@@ -9,6 +9,7 @@ import { createMoneyUI } from './money.js';
 import { PIECES, pieceFor, pieceByKey } from './pieces.js';
 import { BACKGROUNDS, drawTableTile } from './backgrounds.js';
 import { createViewMenu } from './viewmenu.js';
+import { createRaiseUI } from './raise.js';
 import { sfx, soundOn, setSound } from './sounds.js';
 
 const $ = (id) => document.getElementById(id);
@@ -95,12 +96,14 @@ function resetGameView() {
   lastEvent = '';
   selectedSpace = null;
   tradeUI.close();
+  raiseUI.close();
   closeCard?.();
   money.reset();
 }
 
 function leaveRoom(message = '') {
   viewMenu.close();
+  raiseUI.close();
   fullMode = null;
   setFull(false);
   source?.close();
@@ -216,6 +219,26 @@ const tradeUI = createTradeUI({
   send: (action) => roomApi('action', { action }),
 });
 
+const raiseUI = createRaiseUI({
+  root: $('raise-modal'),
+  getGame: () => game,
+  myId: () => session?.id,
+  send: (action) => roomApi('action', { action }),
+  onChange: () => { if (game) renderSide(); },
+});
+/** Open the Raise money panel by itself once, when a debt you can work off starts. */
+let raiseAutoKey = '';
+function maybeOpenRaise() {
+  const s = game?.state;
+  if (!s || s.phase !== 'debt' || s.players[s.current]?.id !== session?.id) return;
+  if (lobby?.members.find((m) => m.id === session.id)?.autoplay) return;
+  if (!game.legal.some((a) => a.type === 'raise_cash')) return;
+  const key = `${s.turn}:${s.debt.total}`;
+  if (key === raiseAutoKey || raiseUI.isOpen() || tradeUI.isOpen()) return;
+  raiseAutoKey = key;
+  raiseUI.open();
+}
+
 // --------------------------------------------------------- card pop-up
 
 const DECK_STYLE = {
@@ -324,6 +347,8 @@ async function drain() {
     }
     render();
     money.reconcile();
+    raiseUI.update();
+    maybeOpenRaise();
   }
   draining = false;
 }
@@ -595,13 +620,13 @@ function makeAuto({ action, label, seconds, key, canRun }) {
   auto.restart = () => { if (auto.timer) auto.deadline = Date.now() + seconds * 1000; };
   auto.schedule = () => {
     auto.stop();
-    const busy = tradeUI.isOpen() || !$('card-popup').hidden || !$('trade-modal').hidden;
+    const busy = tradeUI.isOpen() || raiseUI.isOpen() || !$('card-popup').hidden || !$('trade-modal').hidden;
     if (!game || !canRun(game.legal) || !auto.on() || busy) return;
     auto.deadline = Date.now() + seconds * 1000;
     const tick = () => {
       const b = btn();
       if (!b || b.disabled) return auto.stop();
-      if (tradeUI.isOpen() || !$('card-popup').hidden) {
+      if (tradeUI.isOpen() || raiseUI.isOpen() || !$('card-popup').hidden) {
         // paused while the player is busy; start over afterwards
         auto.deadline = Date.now() + seconds * 1000;
         b.textContent = label;
@@ -647,6 +672,12 @@ function renderSide() {
     buy: `Buy${state.phase === 'buy' ? ` (${BOARD[state.buy.pos].price})` : ''}`, decline: 'Auction it', pass: 'Pass',
     end_turn: 'End turn', pay_debt: 'Pay debt', declare_bankruptcy: 'Go bankrupt',
   };
+  if (state.phase === 'debt' && has(legal, 'raise_cash')) {
+    buttons.push(el('button', {
+      type: 'button', class: has(legal, 'pay_debt') ? '' : 'primary', 'data-action': 'raise',
+      onclick: () => raiseUI.open(),
+    }, '💰 Raise money…'));
+  }
   for (const a of legal) {
     if (a.type === 'bid') {
       const input = el('input', { type: 'number', min: a.min, max: a.max, value: a.min, 'aria-label': 'Bid amount', inputmode: 'numeric' });
@@ -754,7 +785,10 @@ function renderMine() {
       el('div', { class: 'mycard-btns' }, buttons));
   });
   const head = owned.length
-    ? el('div', { class: 'tag' }, `${owned.length} propert${owned.length === 1 ? 'y' : 'ies'} · you could raise about ¤${raise.toLocaleString()} by mortgaging and selling buildings`)
+    ? el('div', { class: 'mine-head' },
+      el('span', { class: 'tag' }, `${owned.length} propert${owned.length === 1 ? 'y' : 'ies'} · you could raise about ¤${raise.toLocaleString()} by mortgaging and selling buildings`),
+      legal.some((a) => a.type === 'raise_cash')
+        ? el('button', { type: 'button', class: 'small', onclick: () => raiseUI.open() }, 'Sell / mortgage several…') : null)
     : null;
   const supply = el('div', { class: 'tag supply' },
     'Own every street of a colour to build. Up to 4 houses each, then a hotel. ',

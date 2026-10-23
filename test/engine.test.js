@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createGame, applyAction, getLegalActions, computeRent, GameError, unmortgageCost,
-  getActor, ACTION_TYPES,
+  getActor, ACTION_TYPES, sellOrder, previewRaise,
 } from '../src/engine.js';
 import { BOARD, GROUP_POSITIONS, GROUPS } from '../src/board.js';
 import { CARDS, DECK_IDS } from '../src/cards.js';
@@ -695,4 +695,74 @@ test('getActor names the one player the game is waiting on', () => {
   assert.equal(getActor(t), 'p3');
   assert.ok(ACTION_TYPES.includes('roll') && !ACTION_TYPES.includes('constructor'));
   assert.equal(getActor({ ...s, winner: 'p1' }), null);
+});
+
+// --------------------------------------------- raising cash in one go
+
+// p1 owns the orange set (16, 18, 19) with 3/4/4 houses, plus 6 and the utility at 12
+const builtDebt = (bankHouses = 30) => edit(mk(), (c) => {
+  own(c, 'p2', 5, 15, 25, 35);
+  own(c, 'p1', 16, 18, 19, 6, 12);
+  c.props[16].houses = 3; c.props[18].houses = 4; c.props[19].houses = 4;
+  c.bank.houses = bankHouses;
+  c.players[0].cash = 50;
+});
+
+test('sellOrder takes buildings off evenly, tallest first', () => {
+  const s = builtDebt();
+  assert.deepEqual(sellOrder(s, 'orange'), [19, 18, 19, 18, 16, 19, 18, 16, 19, 18, 16]);
+  const h = edit(s, (c) => { c.props[16].houses = 4; c.props[18].houses = 5; c.props[19].houses = 5; });
+  assert.deepEqual(sellOrder(h, 'orange').slice(0, 3), [19, 18, 19]);
+});
+
+test('raise_cash sells and mortgages in one atomic step and can pay the debt', () => {
+  let s = roll(builtDebt(), 2, 3).state; // p1 lands on a station of p2: rent 200
+  assert.equal(s.phase, 'debt');
+  assert.ok(getLegalActions(s, 'p1').some((a) => a.type === 'raise_cash'));
+  // houses on orange cost 100: selling 4 levels raises 200, mortgaging 6 and 12 raises 50 + 75
+  const plan = { sell: { orange: 4 }, mortgage: [6, 12] };
+  const pre = previewRaise(s, 'p1', plan);
+  assert.equal(pre.ok, true);
+  assert.equal(pre.raised, 4 * 50 + 50 + 75);
+  assert.deepEqual(pre.levels, { 18: 2, 19: 2 });
+  const r = act(s, 'raise_cash', { ...plan, pay: true });
+  s = r.state;
+  assert.equal(s.props[18].houses, 2);
+  assert.equal(s.props[19].houses, 2);
+  assert.equal(s.props[16].houses, 3);
+  assert.equal(s.bank.houses, 34);
+  assert.ok(s.props[6].mortgaged && s.props[12].mortgaged);
+  assert.equal(P(s, 'p1').cash, 50 + 325 - 200);
+  assert.equal(s.phase, 'post_roll');
+  const sold = r.events.filter((e) => e.type === 'sold_building');
+  assert.deepEqual(sold.map((e) => [e.pos, e.from, e.level, e.amount]), [[18, 4, 2, 100], [19, 4, 2, 100]]);
+});
+
+test('raise_cash rejects bad plans without changing anything', () => {
+  const s = roll(builtDebt(), 2, 3).state;
+  throwsCode(() => act(s, 'raise_cash', { sell: { orange: 12 } }), 'no_buildings');
+  throwsCode(() => act(s, 'raise_cash', { mortgage: [16] }), 'has_buildings');
+  throwsCode(() => act(s, 'raise_cash', { sell: { orange: 1 }, mortgage: [16] }), 'has_buildings');
+  throwsCode(() => act(s, 'raise_cash', { mortgage: [5] }), 'not_owner');
+  throwsCode(() => act(s, 'raise_cash', { sell: { nope: 1 } }), 'bad_plan');
+  throwsCode(() => act(s, 'raise_cash', {}), 'bad_plan');
+  throwsCode(() => act(s, 'raise_cash', { sell: { orange: 1 }, pay: true }), 'insufficient_cash');
+  assert.equal(s.props[19].houses, 4); // untouched
+  // selling the whole set frees it for mortgaging in the same plan
+  const all = act(s, 'raise_cash', { sell: { orange: 11 }, mortgage: [16, 18, 19], pay: true }).state;
+  assert.equal(all.phase, 'post_roll');
+  assert.ok([16, 18, 19].every((q) => all.props[q].houses === 0 && all.props[q].mortgaged));
+});
+
+test('raise_cash breaks up a hotel when the bank has enough houses for what is left', () => {
+  const hotel = (bank) => roll(edit(builtDebt(bank), (c) => {
+    c.props[16].houses = 4; c.props[18].houses = 4; c.props[19].houses = 5;
+  }), 2, 3).state;
+  // selling just the hotel would need 4 houses back from a bank that only has 2
+  throwsCode(() => act(hotel(2), 'raise_cash', { sell: { orange: 1 } }), 'bank_supply');
+  // selling three levels (hotel -> 4 -> 3, then 18: 4 -> 3) leaves 4/3/3 houses: only 2 more needed
+  const s = act(hotel(2), 'raise_cash', { sell: { orange: 3 } }).state;
+  assert.deepEqual([16, 18, 19].map((q) => s.props[q].houses), [4, 3, 3]);
+  assert.equal(s.bank.houses, 0);
+  assert.equal(s.bank.hotels, 13);
 });

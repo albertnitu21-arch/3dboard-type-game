@@ -940,12 +940,14 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
         if (t < split) for (let h = 0; h < 4; h++) house(h, fadeOut(t / split));
         else hotel(dropIn((t - split) / (1 - split)));
       } else if (from === 5) {
+        // a hotel broken up into `to` houses (none when everything was sold)
         if (t < split) hotel(fadeOut(t / split));
-        else for (let h = 0; h < 4; h++) house(h, { s: Math.min(1, (t - split) / (1 - split) * 1.4), dy: 0 });
+        else for (let h = 0; h < to; h++) house(h, { s: Math.min(1, (t - split) / (1 - split) * 1.4), dy: 0 });
       } else if (to > from) {
         for (let h = 0; h < to; h++) house(h, h === to - 1 ? dropIn(t) : {});
       } else {
-        for (let h = 0; h < from; h++) house(h, h === from - 1 ? fadeOut(t) : {});
+        // every house above the new level goes at once
+        for (let h = 0; h < from; h++) house(h, h >= to ? fadeOut(t) : {});
       }
     }
     return out;
@@ -1661,7 +1663,31 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
     if (next?.deckSizes) state = { ...state, deckSizes: state.deckSizes ?? next.deckSizes };
     animating = true;
     try {
-      for (const ev of events) {
+      // a batch from the Raise money panel: many sales/mortgages at once play together
+      const batch = events.filter((e) => e.type === 'sold_building' || e.type === 'mortgaged').length > 2;
+      let batchSold = null;
+      for (let i = 0; i < events.length; i++) {
+        const ev = events[i];
+        if (batch && ev.type === 'sold_building') {
+          // start this building animation without waiting; wait once the run of sales ends
+          const anim = { from: ev.from ?? ev.level + 1, to: ev.level, t: 0 };
+          buildAnims.set(ev.pos, anim);
+          batchSold ??= [];
+          batchSold.push(tween(0.6 / speed, (k) => { anim.t = k; }));
+          api.onEvent?.(ev);
+          if (events[i + 1]?.type !== 'sold_building') {
+            sfx.sell();
+            await Promise.all(batchSold);
+            batchSold = null;
+            await tween(0.35 / speed, () => {});
+          }
+          continue;
+        }
+        if (batch && ev.type === 'mortgaged') {
+          api.onEvent?.(ev);
+          await tween(0.18 / speed, () => {});
+          continue;
+        }
         const t = tokens.get(ev.player);
         if (ev.type === 'roll') {
           if (follow.on) { follow.id = ev.player; follow.focus = 'dice'; }
@@ -1707,7 +1733,8 @@ export function createBoard3D(canvas, { board, groups, colorOf, nameOf, pieceOf 
           await hop(t, 10, false, 0.3 / speed, 0.5);
         } else if (ev.type === 'built' || ev.type === 'sold_building') {
           const to = ev.level;
-          const from = ev.type === 'built' ? to - 1 : to + 1;
+          // a batch sale can take several levels off at once (ev.from)
+          const from = ev.from ?? (ev.type === 'built' ? to - 1 : to + 1);
           const anim = { from, to, t: 0 };
           buildAnims.set(ev.pos, anim);
           if (ev.type === 'built') setTimeout(() => sfx.build(), (to === 5 ? 650 : 280) / speed);

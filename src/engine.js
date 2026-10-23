@@ -471,6 +471,75 @@ function checkUnmortgage(s, p, pos) {
   return null;
 }
 
+// ------------------------------------------- raising cash in one go
+// A plan sells buildings set by set (always evenly, tallest first) and mortgages
+// properties: { sell: { [group]: count }, mortgage: [pos, ...] }. The same preview
+// is used by the engine and by the "Raise money" panel, so their numbers agree.
+
+/** Positions in the order a set's buildings come off when sold evenly (one entry per level). */
+export function sellOrder(s, group) {
+  const grp = GROUP_POSITIONS[group] ?? [];
+  const lv = Object.fromEntries(grp.map((q) => [q, s.props[q].houses]));
+  const out = [];
+  for (;;) {
+    let best = null;
+    for (const q of grp) if (lv[q] > 0 && (best === null || lv[q] >= lv[best])) best = q;
+    if (best === null) return out;
+    out.push(best);
+    lv[best] -= 1;
+  }
+}
+
+/**
+ * Work out what a plan would do, without changing anything.
+ * Returns { ok, error?, message?, raised, levels: { pos: newLevel }, bank, mortgage: [pos], cashAfter }.
+ * Breaking up a hotel only needs enough houses in the bank for what is left standing.
+ */
+export function previewRaise(s, playerId, plan = {}) {
+  const p = byId(s, playerId);
+  const levels = {};
+  const bank = { ...s.bank };
+  let raised = 0;
+  const bad = (error, message) => ({ ok: false, error, message, raised, levels, bank, mortgage: [], cashAfter: p?.cash ?? 0 });
+  if (!p) return bad('not_in_game', 'You are not in this game.');
+  const sell = plan.sell && typeof plan.sell === 'object' ? plan.sell : {};
+  const mort = Array.isArray(plan.mortgage) ? plan.mortgage : [];
+  for (const [group, n] of Object.entries(sell)) {
+    if (!Object.hasOwn(GROUP_POSITIONS, group) || !Number.isInteger(n) || n < 0) return bad('bad_plan', 'That is not a colour set.');
+    if (!n) continue;
+    const grp = GROUP_POSITIONS[group];
+    if (grp.some((q) => s.props[q].owner !== p.id)) return bad('not_owner', 'You do not own that set.');
+    const order = sellOrder(s, group);
+    if (n > order.length) return bad('no_buildings', 'There are not that many buildings to sell there.');
+    const lv = Object.fromEntries(grp.map((q) => [q, s.props[q].houses]));
+    for (const q of order.slice(0, n)) lv[q] -= 1;
+    for (const q of grp) {
+      const was = s.props[q].houses, now = lv[q];
+      if (was === now) continue;
+      bank.houses += (was === 5 ? 0 : was) - (now === 5 ? 0 : now);
+      bank.hotels += (was === 5 ? 1 : 0) - (now === 5 ? 1 : 0);
+      raised += ((was - now) * BOARD[q].houseCost) / 2;
+      levels[q] = now;
+    }
+  }
+  if (bank.houses < 0) {
+    return bad('bank_supply', `The bank only has ${s.bank.houses} houses left, not enough to break up that hotel. Sell more buildings in that set.`);
+  }
+  const level = (q) => levels[q] ?? s.props[q].houses;
+  const seen = new Set();
+  for (const pos of mort) {
+    const st = Number.isInteger(pos) ? s.props[pos] : null;
+    if (!st || seen.has(pos)) return bad('bad_plan', 'That property cannot be mortgaged.');
+    seen.add(pos);
+    if (st.owner !== p.id) return bad('not_owner', `You do not own ${BOARD[pos].name}.`);
+    if (st.mortgaged) return bad('already_mortgaged', `${BOARD[pos].name} is already mortgaged.`);
+    const grp = groupOf(pos);
+    if (grp && grp.some((q) => level(q) > 0)) return bad('has_buildings', `Sell the buildings in ${BOARD[pos].name}'s set before mortgaging it.`);
+    raised += BOARD[pos].mortgage;
+  }
+  return { ok: true, raised, levels, bank, mortgage: [...seen], cashAfter: p.cash + raised };
+}
+
 // ---------------------------------------------------------------- trading
 
 function normalizeOffer(o) {
@@ -746,6 +815,34 @@ const HANDLERS = {
     s.trade = null;
   },
 
+  /** Sell and mortgage several things at once; optionally pay the debt right after. */
+  raise_cash(ctx, a) {
+    const { s } = ctx;
+    const p = cur(s);
+    const r = previewRaise(s, p.id, a);
+    if (!r.ok) fail(r.error, r.message);
+    if (!Object.keys(r.levels).length && !r.mortgage.length) fail('bad_plan', 'Pick something to sell or mortgage.');
+    for (const [q, now] of Object.entries(r.levels)) {
+      const pos = Number(q);
+      const st = s.props[pos];
+      const from = st.houses;
+      const amount = ((from - now) * BOARD[pos].houseCost) / 2;
+      st.houses = now;
+      p.cash += amount;
+      emit(ctx, { type: 'sold_building', player: p.id, pos, level: now, from, amount });
+    }
+    s.bank = r.bank;
+    for (const pos of r.mortgage) {
+      s.props[pos].mortgaged = true;
+      p.cash += BOARD[pos].mortgage;
+      emit(ctx, { type: 'mortgaged', player: p.id, pos, amount: BOARD[pos].mortgage });
+    }
+    if (a.pay) {
+      if (s.phase !== 'debt') fail('wrong_phase', 'There is no debt to pay.');
+      HANDLERS.pay_debt(ctx);
+    }
+  },
+
   pay_debt(ctx) {
     const { s } = ctx;
     const p = cur(s);
@@ -776,6 +873,7 @@ const ACTION_PHASES = {
   unmortgage: MANAGE,
   sell_building: [...MANAGE, 'buy', 'debt'],
   mortgage: [...MANAGE, 'buy', 'debt'],
+  raise_cash: [...MANAGE, 'buy', 'debt'],
   propose_trade: [...MANAGE, 'debt'],
   accept_trade: ['trade'],
   decline_trade: ['trade'],
@@ -900,6 +998,10 @@ export function getLegalActions(s, playerId) {
     ]) {
       if (ACTION_PHASES[type].includes(s.phase) && !check(s, p, pos)) add({ type, pos });
     }
+  }
+  if (ACTION_PHASES.raise_cash.includes(s.phase)
+    && out.some((a) => a.type === 'sell_building' || a.type === 'mortgage')) {
+    add({ type: 'raise_cash', free: true }); // the "Raise money" panel builds the plan
   }
   if (ACTION_PHASES.propose_trade.includes(s.phase)) {
     // Free-form: the UI builds the offer; the engine validates it.

@@ -21,7 +21,7 @@ export function eventDeltas(ev) {
     case 'bought': return [{ id: ev.player, amount: -ev.price, why: BOARD[ev.pos].name }];
     case 'auction_won': return [{ id: ev.player, amount: -ev.amount, why: BOARD[ev.pos].name }];
     case 'built': return [{ id: ev.player, amount: -BOARD[ev.pos].houseCost, why: ev.level === 5 ? 'hotel' : 'house' }];
-    case 'sold_building': return [{ id: ev.player, amount: BOARD[ev.pos].houseCost / 2, why: 'sold' }];
+    case 'sold_building': return [{ id: ev.player, amount: ev.amount ?? BOARD[ev.pos].houseCost / 2, why: 'sold' }];
     case 'mortgaged': return [{ id: ev.player, amount: ev.amount, why: 'mortgage' }];
     case 'unmortgaged': return [{ id: ev.player, amount: -ev.amount, why: 'paid off' }];
     case 'trade_done': {

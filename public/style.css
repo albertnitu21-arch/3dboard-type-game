@@ -634,3 +634,84 @@ body.full .panel-show {
 .pick-emoji.piece-img { width: 64px; height: 64px; object-fit: contain; display: block; }
 .pick:hover:not(:disabled) .pick-emoji.piece-img { transform: scale(1.1) rotate(-4deg); }
 @media (max-width: 420px) { .pick-emoji.piece-img { width: 54px; height: 54px; } }
+
+/* ---------- Raise money panel (sell buildings / mortgage in one go) ---------- */
+.mine-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: space-between; }
+.mine-head .tag { flex: 1 1 180px; }
+#raise-modal { z-index: 62; } /* above the floating money changes */
+.modal.rz { width: min(760px, 100%); }
+.rz-sum { margin: 2px 18px 6px; padding: 10px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.rz-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.rz-stat { display: flex; flex-direction: column; }
+.rz-stat small { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.rz-stat b { font-size: 20px; font-variant-numeric: tabular-nums; }
+.rz-stat.up b { color: var(--money-up, #1f8a4c); }
+.rz-stat.down b { color: var(--money-down, #c0392b); }
+.rz-bar { height: 10px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 9%, transparent); overflow: hidden; }
+.rz-fill { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #e8a23a, #f0c04a); transition: width 0.25s ease; }
+.rz-sum.ok .rz-fill { background: linear-gradient(90deg, #2e9e5b, #49c27a); }
+.rz-verdict { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 13.5px; }
+.rz-sum.ok .rz-verdict > span:first-child { color: var(--money-up, #1f8a4c); }
+.rz-sum.short .rz-verdict > span:first-child b { color: var(--money-down, #c0392b); }
+.rz-quick { display: flex; gap: 6px; }
+.rz-sec { margin: 6px 0 14px; }
+.rz-sec h3 { margin: 0 0 8px; font-size: 15px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.rz-sec h3 small { font-size: 12px; font-weight: 400; color: var(--muted); }
+.rz-sets { display: flex; flex-direction: column; gap: 8px; }
+.rz-set { border-radius: 12px; background: var(--panel); border: 1px solid var(--line); border-left: 6px solid var(--band); padding: 8px 10px 8px 12px; display: flex; flex-direction: column; gap: 8px; }
+.rz-set-hd { display: flex; align-items: baseline; gap: 8px; }
+.rz-set-hd small { color: var(--muted); font-size: 12px; }
+.rz-sub { margin-left: auto; font-weight: 800; color: var(--money-up, #1f8a4c); font-variant-numeric: tabular-nums; }
+.rz-props { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.rz-prop { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; border-radius: 10px; background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.rz-pname { font-size: 12px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rz-slots { display: flex; gap: 4px; align-items: flex-end; min-height: 36px; flex-wrap: wrap; }
+.rz-b { width: 34px; height: 34px; padding: 3px; border-radius: 8px; display: grid; place-items: center; position: relative; background: var(--bg); }
+.rz-b.hotel { width: 42px; }
+.rz-b svg { width: 100%; height: 100%; }
+.rz-b.house path { fill: #2f9e55; stroke: rgba(0,0,0,0.4); stroke-width: 0.7; }
+.rz-b.hotel path { fill: #cf3b2c; stroke: rgba(0,0,0,0.4); stroke-width: 0.7; }
+.rz-b.sell { border-color: var(--money-down, #c0392b); background: color-mix(in srgb, #c0392b 12%, var(--bg)); }
+.rz-b.sell svg { opacity: 0.35; }
+.rz-b.sell::after { content: '−'; position: absolute; inset: 0; display: grid; place-items: center; font-size: 22px; font-weight: 900; color: var(--money-down, #c0392b); }
+.rz-b:hover:not(.sell) { transform: translateY(-1px); }
+.rz-none { color: var(--muted); }
+.rz-after { font-size: 11.5px; color: var(--muted); }
+.rz-step { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.rz-step span { min-width: 112px; text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; }
+.rz-step button { min-width: 34px; }
+.rz-morts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.rz-m {
+  position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left;
+  padding: 0 10px 8px; border-radius: 10px; overflow: hidden; background: #fffcf2; color: #1f221c;
+}
+.rz-m-band { align-self: stretch; margin: 0 -10px 4px; height: 18px; background: var(--band); font-size: 11px; line-height: 18px; text-align: center; }
+.rz-m-name { font-size: 12.5px; font-weight: 700; line-height: 1.2; }
+.rz-m-val { font-size: 12.5px; font-weight: 700; color: #1f8a4c; font-variant-numeric: tabular-nums; }
+.rz-m-lock { font-size: 11px; color: #8a6a2c; }
+.rz-m.blocked { opacity: 0.7; }
+.rz-m.on { border-color: #c0392b; box-shadow: 0 0 0 2px #c0392b; }
+.rz-m.on::after {
+  content: 'MORTGAGED'; position: absolute; right: -4px; top: 26px; transform: rotate(-12deg);
+  font-size: 10px; font-weight: 900; letter-spacing: 0.08em; color: #c0392b; border: 2px solid #c0392b; border-radius: 4px; padding: 0 4px; background: rgba(255,252,242,0.85);
+}
+.rz-receipt ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13px; max-height: 96px; overflow-y: auto; }
+.rz-receipt li, .rz-total { display: flex; justify-content: space-between; gap: 10px; }
+.rz-receipt li b { color: var(--money-up, #1f8a4c); font-variant-numeric: tabular-nums; }
+.rz-total { border-top: 1px dashed var(--line); margin-top: 4px; padding-top: 4px; font-size: 15px; }
+.rz-total b { color: var(--money-up, #1f8a4c); font-variant-numeric: tabular-nums; }
+.rz-empty { text-align: center; }
+.rz-pay { flex-direction: row; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; margin-right: auto; cursor: pointer; }
+.rz-pay input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.modal-ft .error { margin: 0; }
+@media (max-width: 760px) {
+  .modal.rz .rz-sum { margin: 2px 12px 6px; }
+  .rz-stat b { font-size: 17px; }
+  .rz-props { grid-template-columns: 1fr; }
+  .rz-prop { flex-direction: row; align-items: center; flex-wrap: wrap; }
+  .rz-pname { flex: 1 1 100%; }
+  .rz-after { margin-left: auto; }
+  .rz-morts { grid-template-columns: repeat(2, 1fr); }
+  .rz-step span { min-width: 92px; }
+  .rz-pay { flex: 1 1 100%; }
+}
